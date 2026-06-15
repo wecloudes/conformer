@@ -34,4 +34,17 @@ spec:
                 name: {{ include "conformer.fullname" . }}-api
                 port:
                   number: {{ .Values.registryApi.service.port }}
+    # Apex rule: conformer.local -> registry-api. Serves the framework-less
+    # go-getter "direct" mode (/m/{ns}/{name}/{provider}?transformation=...),
+    # which the wildcard subdomain rule does not match.
+    - host: "{{ .Values.domain }}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "conformer.fullname" . }}-api
+                port:
+                  number: {{ .Values.registryApi.service.port }}
 {{- end }}

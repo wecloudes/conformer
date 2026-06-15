@@ -30,6 +30,12 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio-secret}
       MINIO_USE_SSL: "false"
       MINIO_BUCKET: modules
+      # Presigned download URLs must be reachable by the Terraform consumer on
+      # the host (not the internal minio:9000). minio publishes 9000 below, so
+      # presign against localhost:9000. The S3 signature binds the host, so this
+      # must match the host the consumer actually connects to.
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      MINIO_PUBLIC_USE_SSL: ${MINIO_PUBLIC_USE_SSL:-false}
       LISTEN_ADDR: ":8080"
       # Dynamic on-demand patching: cache miss → fetch upstream + patch + cache.
       DYNAMIC_BUILD: ${DYNAMIC_BUILD:-true}
@@ -55,6 +61,7 @@ services:
     volumes:
       - minio-data:/data
     ports:
+      - "9000:9000"   # S3 API — published so presigned download URLs resolve from the host
       - "9001:9001"   # console (optional)
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -79,7 +86,7 @@ services:
     restart: unless-stopped
 
   # One-shot pre-builder — replaces Tekton. Reuses the registry-api image
-  # (bundles tofu/mapotf/graft/gitleaks + the registry-api binary for uploads).
+  # (bundles tofu/mapotf/hcledit/gitleaks + the registry-api binary for uploads).
   # Run via ./build.sh (profile keeps it out of `up`). Mounts the repo so it
   # sees the current patches/ and scripts/.
   builder:

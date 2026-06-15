@@ -20,7 +20,12 @@ const buildTimeout = 8 * time.Minute
 // ensureBuilt guarantees that objectKey exists in MinIO, building it on demand
 // if missing. Concurrent requests for the same key are serialized so the module
 // is fetched and patched exactly once.
-func (s *Server) ensureBuilt(ctx context.Context, namespace, name, provider, version, framework, objectKey string) error {
+//
+// framework selects the framework rule packs ("none" = skip them). transforms is
+// a comma-separated list of composable transformation units to apply (empty in
+// the pure-framework path); it is passed to the build via TRANSFORMATIONS so
+// patch-module.sh applies transformations/<name>/... on top.
+func (s *Server) ensureBuilt(ctx context.Context, namespace, name, provider, version, framework, transforms, objectKey string) error {
 	muIface, _ := s.builds.LoadOrStore(objectKey, &sync.Mutex{})
 	mu := muIface.(*sync.Mutex)
 	mu.Lock()
@@ -44,7 +49,7 @@ func (s *Server) ensureBuilt(ctx context.Context, namespace, name, provider, ver
 	zip.Close()
 	defer os.Remove(zipPath)
 
-	log.Printf("dynamic build START %s (framework=%s)", objectKey, framework)
+	log.Printf("dynamic build START %s (framework=%s transforms=%q)", objectKey, framework, transforms)
 	cmd := exec.CommandContext(bctx, "/bin/bash", s.config.BuildScript,
 		namespace, name, provider, version, framework)
 	cmd.Env = append(os.Environ(),
@@ -52,6 +57,9 @@ func (s *Server) ensureBuilt(ctx context.Context, namespace, name, provider, ver
 		"UPSTREAM_REGISTRY="+s.config.UpstreamRegistry,
 		"OUT_ZIP="+zipPath,
 	)
+	if transforms != "" {
+		cmd.Env = append(cmd.Env, "TRANSFORMATIONS="+transforms)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("dynamic build FAILED %s: %v\n%s", objectKey, err, out)

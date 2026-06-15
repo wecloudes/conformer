@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,19 @@ type Config struct {
 	MinioSecretKey string
 	MinioUseSSL    bool
 	MinioBucket    string
+
+	// MinioPublicEndpoint is the endpoint used to generate PRESIGNED download
+	// URLs — it must be reachable by the Terraform consumer, not just by the
+	// API. The S3 signature binds the host, so the URL cannot be rewritten after
+	// signing. Empty → fall back to MinioEndpoint (works when API and consumer
+	// share a network, e.g. all-in-cluster).
+	MinioPublicEndpoint string
+	MinioPublicUseSSL   bool
+	// MinioRegion is set explicitly so the presign client does NOT do a
+	// bucket-location lookup (GET /<bucket>/?location=). That call would hit the
+	// public endpoint, which is unreachable from inside the container (it points
+	// at the host). MinIO's default region is us-east-1.
+	MinioRegion    string
 	KeycloakIssuer string
 	KeycloakJWKS   string
 	ListenAddr     string
@@ -44,13 +58,20 @@ type Config struct {
 	UpstreamRegistry string // e.g. "registry.terraform.io"
 	BuildScript      string // path to build-dynamic.sh inside the image
 	PatchesDir       string // path to the patches/ tree inside the image
+
+	// DirectMode enables the go-getter "direct" endpoint (/m/...): an ad-hoc,
+	// framework-less transformation set selected via ?transformation=a,b. Open
+	// by design — no token, no entitlement (ADR-009). The upstream allow-list
+	// (ALLOWED_MODULES) still applies in the build script.
+	DirectMode bool
 }
 
 type Server struct {
-	config      Config
-	minioClient *minio.Client
-	jwks        *keyfunc.JWKS
-	builds      sync.Map // objectKey -> *sync.Mutex, dedupes concurrent builds
+	config        Config
+	minioClient   *minio.Client
+	presignClient *minio.Client // generates host-reachable presigned URLs
+	jwks          *keyfunc.JWKS
+	builds        sync.Map // objectKey -> *sync.Mutex, dedupes concurrent builds
 }
 
 // ServiceDiscovery is the response for /.well-known/terraform.json
@@ -87,17 +108,22 @@ func main() {
 		MinioSecretKey: envOrDefault("MINIO_SECRET_KEY", "minio123"),
 		MinioUseSSL:    envOrDefault("MINIO_USE_SSL", "false") == "true",
 		MinioBucket:    envOrDefault("MINIO_BUCKET", "modules"),
-		KeycloakIssuer: envOrDefault("KEYCLOAK_ISSUER", "https://auth.conformer.local/realms/compliance"),
-		KeycloakJWKS:   envOrDefault("KEYCLOAK_JWKS_URL", "https://auth.conformer.local/realms/compliance/protocol/openid-connect/certs"),
-		ListenAddr:     envOrDefault("LISTEN_ADDR", ":8080"),
-		Domain:         envOrDefault("DOMAIN", "conformer.local"),
-		AuthMode:       envOrDefault("AUTH_MODE", "keycloak"),
-		StaticTokens:   parseStaticTokens(os.Getenv("STATIC_TOKENS")),
+
+		MinioPublicEndpoint: os.Getenv("MINIO_PUBLIC_ENDPOINT"),
+		MinioPublicUseSSL:   envOrDefault("MINIO_PUBLIC_USE_SSL", "false") == "true",
+		MinioRegion:         envOrDefault("MINIO_REGION", "us-east-1"),
+		KeycloakIssuer:      envOrDefault("KEYCLOAK_ISSUER", "https://auth.conformer.local/realms/compliance"),
+		KeycloakJWKS:        envOrDefault("KEYCLOAK_JWKS_URL", "https://auth.conformer.local/realms/compliance/protocol/openid-connect/certs"),
+		ListenAddr:          envOrDefault("LISTEN_ADDR", ":8080"),
+		Domain:              envOrDefault("DOMAIN", "conformer.local"),
+		AuthMode:            envOrDefault("AUTH_MODE", "keycloak"),
+		StaticTokens:        parseStaticTokens(os.Getenv("STATIC_TOKENS")),
 
 		DynamicBuild:     envOrDefault("DYNAMIC_BUILD", "false") == "true",
 		UpstreamRegistry: envOrDefault("UPSTREAM_REGISTRY", "registry.terraform.io"),
 		BuildScript:      envOrDefault("BUILD_SCRIPT", "/app/scripts/build-dynamic.sh"),
 		PatchesDir:       envOrDefault("PATCHES_DIR", "/app/patches"),
+		DirectMode:       envOrDefault("DIRECT_MODE", "true") == "true",
 	}
 
 	if cfg.DynamicBuild {
@@ -147,15 +173,36 @@ func main() {
 		}
 	}
 
+	// presignClient generates download URLs the consumer can actually resolve.
+	// When MINIO_PUBLIC_ENDPOINT is set (and differs), build a second client
+	// against it. Region is pinned so presigning never makes a (doomed) bucket-
+	// location call to that unreachable endpoint. Otherwise reuse the main client.
+	presignClient := minioClient
+	if cfg.MinioPublicEndpoint != "" &&
+		(cfg.MinioPublicEndpoint != cfg.MinioEndpoint || cfg.MinioPublicUseSSL != cfg.MinioUseSSL) {
+		pc, perr := minio.New(cfg.MinioPublicEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
+			Secure: cfg.MinioPublicUseSSL,
+			Region: cfg.MinioRegion, // skip the bucket-location lookup
+		})
+		if perr != nil {
+			log.Fatalf("Failed to create MinIO presign client: %v", perr)
+		}
+		presignClient = pc
+		log.Printf("Presigned URLs use public endpoint %s (ssl=%t)", cfg.MinioPublicEndpoint, cfg.MinioPublicUseSSL)
+	}
+
 	srv := &Server{
-		config:      cfg,
-		minioClient: minioClient,
-		jwks:        jwks,
+		config:        cfg,
+		minioClient:   minioClient,
+		presignClient: presignClient,
+		jwks:          jwks,
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/terraform.json", srv.handleServiceDiscovery)
 	mux.HandleFunc("/v1/modules/", srv.handleModules)
+	mux.HandleFunc("/m/", srv.handleDirectModule)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "ok")
@@ -299,7 +346,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, namespac
 		}
 
 		// Fetch from upstream + patch for this framework, then re-check.
-		if berr := s.ensureBuilt(r.Context(), namespace, name, provider, version, framework, objectKey); berr != nil {
+		if berr := s.ensureBuilt(r.Context(), namespace, name, provider, version, framework, "", objectKey); berr != nil {
 			http.Error(w, fmt.Sprintf("Dynamic build failed: %v", berr), http.StatusBadGateway)
 			return
 		}
@@ -311,7 +358,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, namespac
 	}
 
 	// Generate presigned URL (10 min expiry)
-	presignedURL, err := s.minioClient.PresignedGetObject(context.Background(),
+	presignedURL, err := s.presignClient.PresignedGetObject(context.Background(),
 		s.config.MinioBucket, objectKey, 10*time.Minute, nil)
 	if err != nil {
 		log.Printf("Error generating presigned URL: %v", err)
@@ -322,6 +369,109 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, namespac
 	// Terraform expects 204 with X-Terraform-Get header
 	w.Header().Set("X-Terraform-Get", presignedURL.String())
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleDirectModule serves the go-getter "direct" mode (ADR-009): a
+// framework-less, ad-hoc transformation set, OPEN (no token, no entitlement).
+// The consumer writes a go-getter http source, not a registry source, so the
+// transformation set rides a real query string:
+//
+//	source = "https://<domain>/m/<ns>/<name>/<provider>?version=X&transformation=tags,destroy"
+//
+// We build (always, ad-hoc sets are never pre-baked), cache under a canonical
+// profile key, and return X-Terraform-Get pointing at the presigned .zip so
+// go-getter (http getter, dir mode) follows it and unpacks the archive.
+func (s *Server) handleDirectModule(w http.ResponseWriter, r *http.Request) {
+	if !s.config.DirectMode {
+		http.Error(w, "Direct transformation mode disabled", http.StatusNotFound)
+		return
+	}
+
+	// Path: /m/{namespace}/{name}/{provider}
+	path := strings.TrimPrefix(r.URL.Path, "/m/")
+	parts := strings.Split(strings.TrimSuffix(path, "/"), "/")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		http.Error(w, "Expected /m/{namespace}/{name}/{provider}?version=&transformation=", http.StatusBadRequest)
+		return
+	}
+	namespace, name, provider := parts[0], parts[1], parts[2]
+
+	version := r.URL.Query().Get("version")
+	if version == "" {
+		http.Error(w, "missing required query param: version", http.StatusBadRequest)
+		return
+	}
+	transforms := canonicalTransforms(r.URL.Query().Get("transformation"))
+	if len(transforms) == 0 {
+		http.Error(w, "missing/invalid required query param: transformation (comma-separated, [A-Za-z0-9_-])", http.StatusBadRequest)
+		return
+	}
+
+	// Canonical (sorted, deduped) cache key so tags,destroy == destroy,tags.
+	profile := "set." + strings.Join(transforms, "-")
+	objectKey := fmt.Sprintf("%s/%s/%s/%s/%s.zip", namespace, name, provider, profile, version)
+
+	// Ad-hoc sets are never pre-built: build on miss regardless of DynamicBuild.
+	if _, err := s.minioClient.StatObject(r.Context(), s.config.MinioBucket, objectKey, minio.StatObjectOptions{}); err != nil {
+		errResp := minio.ToErrorResponse(err)
+		if errResp.Code != "NoSuchKey" {
+			log.Printf("Error checking object %s: %v", objectKey, err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		if berr := s.ensureBuilt(r.Context(), namespace, name, provider, version, "none", strings.Join(transforms, ","), objectKey); berr != nil {
+			http.Error(w, fmt.Sprintf("Build failed: %v", berr), http.StatusBadGateway)
+			return
+		}
+	}
+
+	presignedURL, err := s.presignClient.PresignedGetObject(context.Background(),
+		s.config.MinioBucket, objectKey, 10*time.Minute, nil)
+	if err != nil {
+		log.Printf("Error generating presigned URL: %v", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// go-getter (http source, dir mode) follows X-Terraform-Get to the archive.
+	// The presigned URL path ends in .zip, so go-getter detects + unpacks it.
+	w.Header().Set("X-Terraform-Get", presignedURL.String())
+	w.WriteHeader(http.StatusOK)
+}
+
+// canonicalTransforms parses, sanitizes, dedupes, and SORTS a comma-separated
+// transformation list. Names become directory names under transformations/ and
+// flow into the build via an env var, so the charset is restricted to
+// [A-Za-z0-9_-] to prevent path traversal / shell injection.
+func canonicalTransforms(raw string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range strings.Split(raw, ",") {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] || !isSafeName(t) {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// isSafeName reports whether s is a safe transformation/dir name: non-empty and
+// only [A-Za-z0-9_-].
+func isSafeName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // extractFramework pulls the framework name from the Host header subdomain

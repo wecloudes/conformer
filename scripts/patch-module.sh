@@ -27,6 +27,26 @@ OUT_ZIP="${6:?out_zip}"
 
 GENERIC_DIR="${PATCHES_ROOT}/${FRAMEWORK}/_default"
 MODULE_DIR="${PATCHES_ROOT}/${FRAMEWORK}/${MODULE}"
+TRANSFORMS_ROOT="${TRANSFORMS_ROOT:-$(dirname "${PATCHES_ROOT}")/transformations}"
+FRAMEWORKS_ROOT="${FRAMEWORKS_ROOT:-$(dirname "${PATCHES_ROOT}")/frameworks}"
+
+# Resolve a framework (FRAMEWORK != "none") to its transformation bundle via the
+# manifest frameworks/<fw>.hcl (ADR-009). With a manifest, the framework is
+# applied through the SAME composable-transformation engine as the ad-hoc path,
+# and the legacy patches/<fw>/ packs are skipped. Without one, fall back to the
+# legacy packs. Any explicit ad-hoc TRANSFORMATIONS are appended after the
+# framework units.
+MANIFEST="${FRAMEWORKS_ROOT}/${FRAMEWORK}.hcl"
+USE_MANIFEST=""
+if [ "${FRAMEWORK}" != "none" ] && [ -f "${MANIFEST}" ]; then
+  fw_list="$(awk '/transformations[[:space:]]*=[[:space:]]*\[/{f=1} f{print} f&&/\]/{exit}' "${MANIFEST}" \
+    | grep -oE '"[A-Za-z0-9_-]+"' | tr -d '"' | paste -sd, -)"
+  if [ -n "${fw_list}" ]; then
+    USE_MANIFEST=1
+    TRANSFORMATIONS="${fw_list}${TRANSFORMATIONS:+,${TRANSFORMATIONS}}"
+    echo "framework ${FRAMEWORK} -> transformations: ${fw_list}"
+  fi
+fi
 
 WORK="$(mktemp -d)"
 OUTPUT_DIR="${WORK}/patched"
@@ -34,10 +54,19 @@ cp -r "${SRC_DIR}" "${OUTPUT_DIR}"
 cd "${OUTPUT_DIR}"
 
 echo "=== [1/6] sanitize (sed + gitleaks) ==="
-find . -name '*.tf' -print0 | xargs -0 -r sed -i -E \
-  's/[0-9]{12}/${data.aws_caller_identity.current.account_id}/g'
-find . -name '*.tf' -print0 | xargs -0 -r sed -i -E \
-  's/(arn:aws:[a-z0-9-]*:)(us|eu|ap|sa|ca|me|af)-[a-z]+-[0-9]/\1${data.aws_region.current.name}/g'
+# AWS account-id / region sanitization rewrites hardcoded values to
+# data.aws_caller_identity / data.aws_region. It is AWS-ONLY: applying it to a
+# non-AWS module injects an aws_* data source the module has no provider for AND
+# corrupts any 12-digit run in descriptions/examples (e.g. Azure GUIDs). Gate it
+# on the module actually using the AWS provider.
+if grep -rqiE 'provider[[:space:]]+"aws"|resource[[:space:]]+"aws_|data[[:space:]]+"aws_|hashicorp/aws' . 2>/dev/null; then
+  find . -name '*.tf' -print0 | xargs -0 -r sed -i -E \
+    's/[0-9]{12}/${data.aws_caller_identity.current.account_id}/g'
+  find . -name '*.tf' -print0 | xargs -0 -r sed -i -E \
+    's/(arn:aws:[a-z0-9-]*:)(us|eu|ap|sa|ca|me|af)-[a-z]+-[0-9]/\1${data.aws_region.current.name}/g'
+else
+  echo "  (non-AWS module — skipping AWS account-id/region sanitization)"
+fi
 # Third-party modules routinely trip gitleaks on example fixtures / var defaults
 # (examples/*.pfx, sample passwords). Report by default; only block the build
 # when GITLEAKS_STRICT=true (use for curated, first-party modules).
@@ -56,40 +85,113 @@ done
 
 echo "=== [3/6] structural transforms (mapotf) ==="
 
-# Generic _default pack (all *.mptf.hcl), applied at the module root.
-if [ -f "${GENERIC_DIR}/rules.mptf.hcl" ]; then
-  echo "  generic: ${FRAMEWORK}/_default"
-  ( cd "${OUTPUT_DIR}" && mapotf transform -r --mptf-dir "${GENERIC_DIR}" )
+# Legacy framework packs (patches/<fw>/...) — used ONLY when the framework has no
+# manifest (USE_MANIFEST unset) and a framework was requested. With a manifest,
+# the same content is applied through the transformation engine below, so running
+# these too would double-apply.
+if [ -z "${USE_MANIFEST}" ] && [ "${FRAMEWORK}" != "none" ]; then
+  # Generic _default pack (all *.mptf.hcl), applied at the module root.
+  if [ -f "${GENERIC_DIR}/rules.mptf.hcl" ]; then
+    echo "  generic: ${FRAMEWORK}/_default"
+    ( cd "${OUTPUT_DIR}" && mapotf transform -r --mptf-dir "${GENERIC_DIR}" )
+  fi
+
+  # Module-specific rules MIRROR the module's directory layout: a rules.mptf.hcl
+  # at <module>/ runs at the module root; one at <module>/modules/db_instance/
+  # runs inside OUTPUT_DIR/modules/db_instance. This is how HARD resource
+  # overrides reach resources that live in local submodules (wrapper modules).
+  if [ -d "${MODULE_DIR}" ]; then
+    find "${MODULE_DIR}" -name 'rules.mptf.hcl' | sort | while read -r rf; do
+      ruledir="$(dirname "${rf}")"
+      rel="${ruledir#"${MODULE_DIR}"}"; rel="${rel#/}"        # "" or "modules/db_instance"
+      tgt="${OUTPUT_DIR}${rel:+/${rel}}"
+      if [ -d "${tgt}" ]; then
+        echo "  module-specific: ${FRAMEWORK}/${MODULE}/${rel:-.} -> ${rel:-(root)}"
+        ( cd "${tgt}" && mapotf transform -r --mptf-dir "${ruledir}" )
+      else
+        echo "  skip ${rel} (not present in this module)"
+      fi
+    done
+  fi
 fi
 
-# Module-specific rules MIRROR the module's directory layout: a rules.mptf.hcl at
-# <module>/ runs at the module root; one at <module>/modules/db_instance/ runs
-# inside OUTPUT_DIR/modules/db_instance. This is how HARD resource overrides
-# reach resources that live in local submodules (wrapper modules).
-if [ -d "${MODULE_DIR}" ]; then
-  find "${MODULE_DIR}" -name 'rules.mptf.hcl' | sort | while read -r rf; do
-    ruledir="$(dirname "${rf}")"
-    rel="${ruledir#"${MODULE_DIR}"}"; rel="${rel#/}"        # "" or "modules/db_instance"
-    tgt="${OUTPUT_DIR}${rel:+/${rel}}"
-    if [ -d "${tgt}" ]; then
-      echo "  module-specific: ${FRAMEWORK}/${MODULE}/${rel:-.} -> ${rel:-(root)}"
-      ( cd "${tgt}" && mapotf transform -r --mptf-dir "${ruledir}" )
-    else
-      echo "  skip ${rel} (not present in this module)"
+# Composable transformations (framework-agnostic units). Selected ad hoc
+# (e.g. ?transformation=tags,destroy) or expanded from a framework manifest
+# above. TRANSFORMATIONS is a comma-separated list of unit names under
+# TRANSFORMS_ROOT/<name>/. For each unit apply its _default rules (any module)
+# then module-specific rules, mirroring the module dir layout. Order = list order.
+if [ -n "${TRANSFORMATIONS:-}" ]; then
+  _oifs="${IFS}"; IFS=','
+  for tname in ${TRANSFORMATIONS}; do
+    IFS="${_oifs}"
+    tname="$(printf '%s' "${tname}" | tr -d '[:space:]')"
+    [ -n "${tname}" ] || { IFS=','; continue; }
+    tgeneric="${TRANSFORMS_ROOT}/${tname}/_default"
+    tmodule="${TRANSFORMS_ROOT}/${tname}/${MODULE}"
+    applied=0
+    # A generic unit applies if its _default dir has ANY *.mptf.hcl (a unit may
+    # ship several, e.g. aws-secure-defaults = aws-modules + aws-datasources).
+    # mapotf --mptf-dir applies them all in one pass.
+    if ls "${tgeneric}"/*.mptf.hcl >/dev/null 2>&1; then
+      echo "  transformation(generic): ${tname}/_default"
+      ( cd "${OUTPUT_DIR}" && mapotf transform -r --mptf-dir "${tgeneric}" )
+      applied=1
     fi
+    if [ -d "${tmodule}" ]; then
+      find "${tmodule}" -name 'rules.mptf.hcl' | sort | while read -r rf; do
+        ruledir="$(dirname "${rf}")"
+        rel="${ruledir#"${tmodule}"}"; rel="${rel#/}"        # "" or "modules/<sub>"
+        tgt="${OUTPUT_DIR}${rel:+/${rel}}"
+        if [ -d "${tgt}" ]; then
+          echo "  transformation: ${tname}/${MODULE}/${rel:-.} -> ${rel:-(root)}"
+          ( cd "${tgt}" && mapotf transform -r --mptf-dir "${ruledir}" )
+        else
+          echo "  skip ${tname}/${rel} (not present in this module)"
+        fi
+      done
+      applied=1
+    fi
+    [ "${applied}" -eq 1 ] || echo "  WARN: transformation '${tname}' has no _default and no rules for module '${MODULE}' — nothing applied"
+    IFS=','
   done
+  IFS="${_oifs}"
 fi
 
 find . -name '*.tf.mptfbackup' -delete
 
 echo "=== [4/6] advisory toggles + metadata ==="
-for d in "${GENERIC_DIR}" "${MODULE_DIR}"; do
-  if [ -f "${d}/patch.hcl" ]; then
-    echo "# === Compliance toggles: ${FRAMEWORK} ($(basename "${d}")) ===" >> _compliance.tf
-    cat "${d}/patch.hcl" >> _compliance.tf
-  fi
-done
-cat >> _compliance.tf <<EOF
+# Advisory toggles (patch.hcl) from each applied transformation unit (_default +
+# module dir). These are the source of the per-framework S3 toggle variables now
+# that the framework S3 checks live in aws-s3-checks-<fw> units.
+if [ -n "${TRANSFORMATIONS:-}" ]; then
+  _oifs="${IFS}"; IFS=','
+  for tname in ${TRANSFORMATIONS}; do
+    IFS="${_oifs}"
+    tname="$(printf '%s' "${tname}" | tr -d '[:space:]')"
+    [ -n "${tname}" ] || { IFS=','; continue; }
+    for d in "${TRANSFORMS_ROOT}/${tname}/_default" "${TRANSFORMS_ROOT}/${tname}/${MODULE}"; do
+      if [ -f "${d}/patch.hcl" ]; then
+        echo "# === Toggles: ${tname} ($(basename "${d}")) ===" >> _compliance.tf
+        cat "${d}/patch.hcl" >> _compliance.tf
+      fi
+    done
+    IFS=','
+  done
+  IFS="${_oifs}"
+fi
+# Legacy framework toggles — only when not using a manifest.
+if [ -z "${USE_MANIFEST}" ] && [ "${FRAMEWORK}" != "none" ]; then
+  for d in "${GENERIC_DIR}" "${MODULE_DIR}"; do
+    if [ -f "${d}/patch.hcl" ]; then
+      echo "# === Compliance toggles: ${FRAMEWORK} ($(basename "${d}")) ===" >> _compliance.tf
+      cat "${d}/patch.hcl" >> _compliance.tf
+    fi
+  done
+fi
+# Framework metadata only when a framework was applied. The no-framework path
+# (FRAMEWORK=none, ad-hoc transformations) skips it.
+if [ "${FRAMEWORK}" != "none" ]; then
+  cat >> _compliance.tf <<EOF
 
 variable "compliance_framework" {
   type        = string
@@ -101,6 +203,19 @@ variable "compliance_framework" {
   }
 }
 EOF
+fi
+
+# Record the exact transformation set applied (framework-expanded or ad hoc).
+if [ -n "${TRANSFORMATIONS:-}" ]; then
+  cat >> _compliance.tf <<EOF
+
+variable "conformer_transformations" {
+  type        = string
+  default     = "${TRANSFORMATIONS}"
+  description = "Composable transformations applied to this module (comma-separated)"
+}
+EOF
+fi
 
 # Default: skip validate. `tofu init`/`validate` would resolve providers from
 # the OpenTofu registry, which may not carry every provider a third-party module

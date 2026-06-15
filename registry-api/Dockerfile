@@ -8,8 +8,6 @@ COPY registry-api/go.mod registry-api/go.sum ./
 RUN go mod download
 COPY registry-api/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/registry-api .
-# graft (MPL-2.0) — no release binaries published, build from source.
-RUN CGO_ENABLED=0 GOBIN=/out go install github.com/ms-henglu/graft@v0.2.0
 
 # Final image carries the patch toolkit so the API can build modules on demand.
 # Tool set mirrors patches/Dockerfile.patch-toolkit. All licenses are
@@ -37,9 +35,10 @@ RUN GL=$([ "${TARGETARCH}" = "arm64" ] && echo arm64 || echo x64); \
     | tar -xz -C /usr/local/bin gitleaks
 
 COPY --from=gobuild /out/registry-api /usr/local/bin/registry-api
-COPY --from=gobuild /out/graft /usr/local/bin/graft
 COPY scripts/ /app/scripts/
 COPY patches/ /app/patches/
+COPY transformations/ /app/transformations/
+COPY frameworks/ /app/frameworks/
 RUN chmod +x /app/scripts/*.sh
 
 # tofu get / mapotf need a writable workdir; /tmp is fine.

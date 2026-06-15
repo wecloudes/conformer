@@ -10,6 +10,14 @@
 	reverse_proxy registry-api:8080
 }
 
+# Apex (no subdomain) -> registry-api. Serves the framework-less go-getter
+# "direct" mode: conformer.local/m/{ns}/{name}/{provider}?transformation=...
+# The wildcard above does not match the bare apex domain.
+conformer.local {
+	tls internal
+	reverse_proxy registry-api:8080
+}
+
 # Optional: expose Keycloak when running with --profile keycloak.
 auth.conformer.local {
 	tls internal

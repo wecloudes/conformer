@@ -22,4 +22,5 @@ module "automation" {
   name                = "smoke-aa"
   resource_group_name = "rg-smoke"
   location            = "westeurope"
+  sku                 = "Basic"
 }
