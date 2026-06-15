@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Validate the current rule packs against a REAL upstream module, without the
-# full stack. Runs inside the toolkit/registry-api image (tofu/mapotf/jq on
+# Validate the current transformation units against a REAL upstream module,
+# without the full stack. Runs inside the registry-api image (tofu/mapotf/jq on
 # PATH) with the repo mounted at /repo. Driven by `make test-rule`.
 #
 #   test-rule.sh <framework> <namespace> <module> <provider> <version>

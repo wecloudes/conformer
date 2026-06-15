@@ -52,13 +52,10 @@ listing the units it enables, not a folder of rules.
 
 ## Deploying the registry (Model A)
 
-| Path | When |
-|---|---|
-| [`compose/`](../compose/) | **Simple** — single host, Docker Compose, static-token auth, no Keycloak/Tekton |
-| [`charts/conformer/`](../charts/conformer/) | **Production** — Kubernetes/Helm, Keycloak OIDC, Tekton build pipeline |
-
-Both serve the identical Registry Protocol and run the same hardening pipeline;
-Compose swaps Tekton for a one-shot builder and Keycloak for static tokens.
+Deploy with [`compose/`](../compose/) — a single-host Docker Compose stack
+(registry-api + MinIO + Caddy + a one-shot builder) that serves the Registry
+Protocol and runs the hardening pipeline. Auth is static-token by default, with
+optional external OIDC.
 
 ## Consuming
 

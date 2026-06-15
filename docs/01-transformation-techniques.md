@@ -19,14 +19,16 @@ upstream module (fetched at a git tag)
    hardened module in cache → plan    (Model B)
 ```
 
-Layers 1–4 run wherever the transform happens (Tekton for Model A, the consumer
-machine for Model B). Layer 5 runs against a real plan, so it lives on the
-consumer/CI side in both models.
+Layers 1–4 run wherever the transform happens (the compose builder pre-builds
+for Model A, or an on-demand dynamic build serves it; the consumer machine for
+Model B). Layer 5 runs against a real plan, so it lives on the consumer/CI side
+in both models.
 
-The build orchestration is
-[`charts/conformer/templates/tekton/task-patch-module.yaml`](../charts/conformer/templates/tekton/task-patch-module.yaml).
-All tools ship in one image,
-[`toolkit/Dockerfile.patch-toolkit`](../toolkit/Dockerfile.patch-toolkit).
+The build orchestration is the layered pipeline
+[`scripts/patch-module.sh`](../scripts/patch-module.sh), run by the Docker
+Compose `builder` (`./build.sh`) or the registry-api's in-process dynamic
+builder. All tools ship in one image,
+[`registry-api/Dockerfile`](../registry-api/Dockerfile).
 
 ---
 
@@ -227,14 +229,13 @@ left untouched — no dangling references, no spurious AWS provider dependency.
 
 ---
 
-## The toolkit image
+## The registry-api image
 
-Every tool above lives in one image so the pipeline (and any consumer) has a
-consistent environment:
+Every tool above is bundled into the `registry-api` image so the pipeline (and
+any consumer) has a consistent environment:
 
 ```bash
-docker build -f toolkit/Dockerfile.patch-toolkit \
-  -t compliance-patch-toolkit:latest toolkit/
+docker build -f registry-api/Dockerfile -t conformer-registry-api:latest .
 ```
 
 Contents (pinned versions, set as `ARG`s in the Dockerfile):
@@ -247,13 +248,12 @@ Contents (pinned versions, set as `ARG`s in the Dockerfile):
 | gitleaks | 8.30.1 | MIT |
 
 plus `jq`/`gawk`/`sed`. OpenTofu replaces Terraform (BUSL); uploads use the
-minio-go SDK, not the AGPL `mc`. See [LICENSES.md](../LICENSES.md). Set it as
-`tekton.patchImage` in
-[`values.yaml`](../charts/conformer/values.yaml), and use the same
-image in CI for Model B (see
+minio-go SDK, not the AGPL `mc`. See [LICENSES.md](../LICENSES.md). The same
+image backs both the compose `builder` and the registry-api's dynamic builder;
+use it in CI for Model B as well (see
 [consuming §CI](03-consuming.md#ci-integration)).
 
-**Architecture:** the Dockerfiles declare `ARG TARGETARCH` with no default, so
+**Architecture:** the Dockerfile declares `ARG TARGETARCH` with no default, so
 BuildKit fills in the build platform (`amd64` / `arm64`) and the right native
 binaries are downloaded. Do not hardcode `amd64` — emulated Go binaries crash
 under QEMU (`fatal error: lfstack.push`) on Apple Silicon.
@@ -285,8 +285,6 @@ the catalog:
    directly for ad-hoc sets — the units are identical either way.)
 3. For a new registry **subdomain**, add the framework mapping in
    [`registry-api/main.go`](../registry-api/main.go) (`frameworkMap`, e.g.
-   `cis → cis_v600`) and a Keycloak role `framework:<name>`, then wire patch +
-   upload tasks in
-   [`pipeline.yaml`](../charts/conformer/templates/tekton/pipeline.yaml).
+   `cis → cis_v600`) and a Keycloak role `framework:<name>`.
 
 The same units are reused by Model B with no changes.

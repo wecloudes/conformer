@@ -22,41 +22,50 @@ ad-hoc via a direct go-getter URL that names the units inline. Inspired by
 
 ## Architecture
 
+Conformer ships as a single-host Docker Compose stack:
+
 ```
-*.conformer.local (wildcard DNS)
+*.conformer.local + apex (wildcard DNS → 127.0.0.1)
         │
   ┌─────▼──────┐
-  │ Nginx      │
-  │ Ingress    │
+  │   Caddy    │  wildcard reverse proxy + automatic local TLS
   └─────┬──────┘
         │
-  ┌─────┼──────────────────┐
-  │     │                  │
-  ▼     ▼                  ▼
-Registry  Keycloak       MinIO
-API       (OAuth2)       (S3-compat)
-  │
-  ▼
-Tekton Pipelines
-(build compliance modules)
+  ┌─────▼───────┐        ┌──────────┐
+  │ Registry    │───────▶│  MinIO   │  S3-compatible zip storage
+  │ API (Go)    │        └──────────┘
+  │ + toolkit   │
+  └─────┬───────┘
+        │ on-demand dynamic build
+        ▼  (fetch upstream → patch → cache)
+  ┌─────────────┐
+  │  builder    │  one-shot pre-builder (./build.sh), same image
+  └─────────────┘
 ```
+
+Auth defaults to static bearer tokens. OIDC is still supported in code
+(`AUTH_MODE=keycloak`) but only against an **external** Keycloak you run
+yourself — there is no bundled identity provider.
 
 ### Components
 
-| Component | Tool | Purpose |
+The whole product is the four Compose services in [`compose/`](compose/):
+
+| Service | Tool | Purpose |
 |---|---|---|
-| Registry API | Custom Go service | Terraform Module Registry Protocol v1 |
-| Auth | Keycloak (Bitnami chart) | OAuth2/OIDC, framework entitlements |
-| Storage | MinIO (Bitnami chart) | S3-compatible module zip storage |
-| Build | Tekton Pipelines | Patch upstream modules, upload to MinIO |
-| Ingress | nginx-ingress | Wildcard subdomain routing |
-| TLS | cert-manager | Wildcard certificate management |
+| `registry-api` | Custom Go service (bundled toolkit) | Terraform Module Registry Protocol v1 + `/m/` direct endpoint; builds modules on demand |
+| `minio` | MinIO | S3-compatible module zip storage |
+| `builder` | one-shot `./build.sh` (registry-api image) | Pre-build / warm the cache, upload to MinIO |
+| `caddy` | Caddy | Wildcard subdomain routing + automatic local TLS |
+
+The patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) is bundled **inside** the
+`registry-api` image — there is no separate toolkit image.
 
 ### How it works
 
-1. Framework subdomains (`cis.conformer.local`, `iso27001.conformer.local`) all resolve to the same ingress
+1. Framework subdomains (`cis.conformer.local`, `iso27001.conformer.local`) all resolve to the same Caddy proxy
 2. The Registry API extracts the framework from the `Host` header
-3. Validates the Bearer token against Keycloak JWKS, checks framework entitlement
+3. Validates the Bearer token (static tokens by default; an external Keycloak JWKS when `AUTH_MODE=keycloak`), checks framework entitlement
 4. Expands the framework manifest to its transformation-unit list, builds (or reuses) the hardened zip
 5. Returns a presigned MinIO URL and Terraform downloads / uses the patched module transparently
 
@@ -82,9 +91,9 @@ module-specific rules that mirror the upstream module's directory layout (e.g.
 declared in `frameworks/<framework>.hcl` with a `description` and a
 `transformations = [...]` list. The build engine `scripts/patch-module.sh`
 either expands a framework manifest to its unit list, or takes an explicit
-`TRANSFORMATIONS=a,b` env list — both feed the same engine. All tools ship in
-one image built from `toolkit/Dockerfile.patch-toolkit` (set as
-`tekton.patchImage`).
+`TRANSFORMATIONS=a,b` env list — both feed the same engine. All tools ship
+bundled inside the `registry-api` image, so the same binary serves requests and
+builds modules on demand.
 
 The transformation-unit vocabulary:
 
@@ -132,123 +141,73 @@ transformation set is chosen and whether the request is gated.
 
 These map onto the enforcement spectrum:
 
-- **Model A — registry (this chart):** transform runs once in Tekton, the
-  hardened zip is stored in MinIO and served via the Registry Protocol.
-  Consumers use plain `terraform`; enforcement is mandatory and server-gated.
+- **Model A — registry (the Compose stack):** the transform runs server-side —
+  either pre-built by the Compose builder (`./build.sh`) or on demand at first
+  request (dynamic build) — and the hardened zip is stored in MinIO and served
+  via the Registry Protocol. Consumers use plain `terraform`; enforcement is
+  mandatory and server-gated.
 - **Model B — direct (no registry, no fork):** the *same* `rules.mptf.hcl` are
   applied on the consumer side at plan time with `mapotf transform`. Zero server
   infra, but opt-in (a convenience, not a control). See
   [`examples/consumer-side-mapotf/`](examples/consumer-side-mapotf/).
 
-## Quick start (Docker Compose)
-
-Prefer a single host over Kubernetes? [`compose/`](compose/) runs the whole
-registry with Docker Compose — static-token auth (no Keycloak), MinIO, a Caddy
-wildcard proxy, and a one-shot builder that replaces Tekton:
-
-```bash
-cd compose
-cp .env.example .env
-docker compose up -d
-./build.sh cis_v600 s3-bucket 5.11.0
-```
-
-See [`compose/README.md`](compose/README.md) for DNS/TLS setup and consuming.
-The Kubernetes/Helm path below is for production / multi-tenant deployments.
-
 ## Prerequisites
 
-- Kubernetes cluster (1.27+)
-- Helm 3.12+
-- nginx-ingress controller installed
-- cert-manager installed
-- Tekton Pipelines installed
+- Docker + Docker Compose
+- `terraform` or `tofu` to consume the registry
 
-```bash
-# cert-manager
-helm repo add jetstack https://charts.jetstack.io
-helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager --create-namespace \
-  --set crds.enabled=true
-
-# nginx-ingress
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
-helm install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx --create-namespace
-
-# Tekton Pipelines
-kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
-```
+That's the whole list — the registry, storage, proxy/TLS, and the build pipeline
+all run as containers in the Compose stack.
 
 ## Installation
 
-### 1. Build the Registry API image
+[`compose/`](compose/) is the entire deployment. Bring up the stack:
 
 ```bash
-cd registry-api/
-docker build -t conformer-api:latest .
-
-# If using a remote registry:
-docker tag conformer-api:latest your-registry.com/conformer-api:latest
-docker push your-registry.com/conformer-api:latest
+cd compose
+cp .env.example .env          # set STATIC_TOKENS to your own secret
+docker compose up -d --build
 ```
 
-### 2. Update values
-
-Edit `charts/conformer/values.yaml`:
-
-```yaml
-domain: compliance.yourdomain.com
-
-registryApi:
-  image:
-    repository: your-registry.com/conformer-api
-    tag: latest
-
-keycloak:
-  auth:
-    adminPassword: "your-secure-password"
-
-minio:
-  auth:
-    rootPassword: "your-secure-password"
-```
-
-### 3. Install the Helm chart
+This starts `registry-api`, `minio` (creates the `modules` bucket on first
+start), and `caddy`. With `DYNAMIC_BUILD=true` (the default) any upstream module
+is fetched, patched, and cached on first request — no pre-build needed. To warm
+the cache or pre-build explicitly:
 
 ```bash
-cd charts/conformer/
-helm dependency update .
-helm install compliance . \
-  --namespace compliance \
-  --create-namespace
+./build.sh cis_v600 s3-bucket 5.11.0
 ```
 
-### 4. Configure DNS
+### Local DNS + TLS (one-time)
 
-Point `*.compliance.yourdomain.com` to your ingress controller's external IP:
+Terraform requires HTTPS for registry hosts. Caddy serves `*.conformer.local`
+and the apex with its internal CA:
 
 ```bash
-# Get the ingress IP
-kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+# point the subdomains AND the apex (for direct go-getter mode) at localhost
+sudo sh -c 'echo "127.0.0.1 conformer.local cis.conformer.local iso27001.conformer.local soc2.conformer.local" >> /etc/hosts'
 
-# Create wildcard DNS record:
-# *.compliance.yourdomain.com -> <ingress-ip>
+# trust Caddy's local CA so Terraform accepts the cert
+docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+# macOS:
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ./caddy-root.crt
 ```
 
-For local development, add entries to `/etc/hosts`:
-```
-127.0.0.1 cis.conformer.local iso27001.conformer.local soc2.conformer.local auth.conformer.local
-```
+See [`compose/README.md`](compose/README.md) for the full deployment guide,
+including the Linux CA-trust steps, auth modes, and a no-Terraform API check.
 
 ## Usage
 
 ### Authenticate with the registry
 
+Static-token auth (the default) has no `terraform login` — pass the token via an
+env var (host dots → underscores), entitled to the framework in `STATIC_TOKENS`:
+
 ```bash
-terraform login cis.conformer.local
-# Opens browser -> Keycloak login -> token saved to ~/.terraform.d/credentials.tfrc.json
+export TF_TOKEN_cis_conformer_local=dev-token-changeme
 ```
+
+The direct `/m/...` go-getter mode is ungated and needs no token.
 
 ### Use a compliance module
 
@@ -296,40 +255,19 @@ module "s3_bucket" {
 
 ## Building Compliance Modules
 
-### Manual PipelineRun
+### Pre-build a module
+
+The one-shot builder runs the layered pipeline and uploads the hardened zip to
+MinIO (`framework module version`):
 
 ```bash
-kubectl create -f - <<EOF
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  generateName: build-s3-bucket-
-  namespace: compliance
-spec:
-  pipelineRef:
-    name: compliance-build-module
-  params:
-    - name: module-namespace
-      value: "terraform-aws-modules"
-    - name: module-name
-      value: "s3-bucket"
-    - name: module-provider
-      value: "aws"
-    - name: module-version
-      value: "5.11.0"
-  workspaces:
-    - name: shared-workspace
-      volumeClaimTemplate:
-        spec:
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 5Gi
-    - name: patches-workspace
-      configMap:
-        name: compliance-patches
-EOF
+cd compose
+./build.sh cis_v600 s3-bucket 5.11.0
+./build.sh soc2     s3-bucket 5.11.0
 ```
+
+With `DYNAMIC_BUILD=true` (the default) this is optional — the registry builds
+and caches any requested module on first use.
 
 ### Adding rules for a new module
 
@@ -337,8 +275,8 @@ EOF
    `transformations/{unit}/{module}/rules.mptf.hcl` (mirroring the upstream
    module's dir layout), with an optional `patch.hcl` advisory toggle in the
    unit dir. Generic rules live under `transformations/{unit}/_default/`.
-2. Update the CronJob module list in `values.yaml` or the trigger ConfigMap
-3. Run the pipeline manually or wait for the next scheduled check
+2. Request the module (dynamic mode picks up the new rules immediately) or
+   pre-build it with `./build.sh`.
 
 ### Adding a new transformation unit
 
@@ -351,29 +289,27 @@ EOF
 
 1. Create `frameworks/{name}.hcl` with a `description` and a
    `transformations = [...]` bundle of unit names
-2. Add the framework to `values.yaml` under `frameworks`
-3. Add Keycloak role `framework:{name}` to the realm configuration
-4. Wire the subdomain through the ingress (or use the dynamic approach)
+2. Entitle a token to it in `STATIC_TOKENS` (or, for external Keycloak, add the
+   matching `framework:{name}` entitlement to the token claims). The `{name}`
+   subdomain resolves through Caddy's wildcard proxy automatically.
 
 ## Project Structure
 
 ```
 conformer/
 ├── docs/                           # Strategy + technique + consuming guides
-├── compose/                        # Docker Compose stack (simple, single-host)
-├── charts/conformer/     # Helm umbrella chart
-│   ├── Chart.yaml                  # Bitnami keycloak + minio as deps
-│   ├── values.yaml                 # All configuration
-│   └── templates/
-│       ├── registry-*.yaml         # Custom Registry API resources
-│       ├── ingress.yaml            # Wildcard subdomain routing
-│       ├── cert-*.yaml             # cert-manager resources
-│       ├── keycloak-realm-*.yaml   # Keycloak realm import
-│       └── tekton/                 # Pipeline, tasks, triggers
-├── registry-api/                   # Go service (TF Registry Protocol)
+├── compose/                        # Docker Compose stack — the whole product
+│   ├── docker-compose.yml          # registry-api + minio + caddy + builder
+│   ├── Caddyfile                   # wildcard proxy + automatic local TLS
+│   ├── .env.example                # STATIC_TOKENS, DYNAMIC_BUILD, …
+│   ├── build.sh                    # one-shot pre-build (framework module version)
+│   ├── build-module.sh             # builder entrypoint
+│   └── README.md                   # full deployment guide
+├── registry-api/                   # Go service (TF Registry Protocol) + bundled toolkit
 │   ├── main.go
+│   ├── build.go
 │   ├── go.mod
-│   └── Dockerfile
+│   └── Dockerfile                  # tofu+mapotf+hcledit+jq+gitleaks + the Go binary
 ├── transformations/                # Atomic, composable transformation units
 │   ├── destroy/                    # generic: prevent_destroy on all resources
 │   │   └── _default/rules.mptf.hcl
@@ -390,27 +326,19 @@ conformer/
 │   ├── cis_v600.hcl                # description + transformations = [...]
 │   ├── iso27001.hcl
 │   └── soc2.hcl
-├── toolkit/
-│   └── Dockerfile.patch-toolkit    # opentofu+mapotf+hcledit+jq+gitleaks image
 ├── scripts/
 │   ├── patch-module.sh             # build engine: framework manifest OR TRANSFORMATIONS=a,b
 │   ├── apply-transforms.sh         # Model B: apply a framework's units in place
 │   ├── build-dynamic.sh            # on-demand: fetch upstream + patch + cache
-│   └── plan-gate.sh                # plan-time jq compliance gate
+│   ├── plan-gate.sh                # plan-time jq compliance gate
+│   └── test-rule.sh                # exercise a single transformation rule
 └── examples/
     ├── consumer-side-mapotf/       # Model B: patch directly, no registry/fork
     ├── direct-transform/           # Direct go-getter mode: ad-hoc, framework-less
+    ├── compose-smoke-test/         # end-to-end check against the Compose stack
     └── terragrunt/                 # Terragrunt: tfr:// (A) + before_hook (B)
 ```
 
 Terragrunt consumers: see [`examples/terragrunt/`](examples/terragrunt/) for
 both the `tfr://` registry source (Model A) and the `before_hook` mapotf
 approach (Model B).
-
-### Build the patch toolkit image
-
-```bash
-docker build -f toolkit/Dockerfile.patch-toolkit \
-  -t compliance-patch-toolkit:latest toolkit/
-# push to your registry, then set tekton.patchImage in values.yaml
-```

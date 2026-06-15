@@ -1,17 +1,16 @@
-# Docker Compose — the simple, single-host alternative to the Helm/K8s stack.
+# Docker Compose — the single-host stack that runs the whole registry.
 #
-#   registry-api  Go service (Terraform Registry Protocol), static-token auth;
-#                 ensures the MinIO bucket on startup
+#   registry-api  Go service (Terraform Registry Protocol + /m/ direct endpoint),
+#                 bundled patch toolkit; ensures the MinIO bucket on startup
 #   minio         S3-compatible storage for hardened module zips
-#   caddy         wildcard reverse proxy + automatic local TLS
+#   caddy         wildcard reverse proxy + automatic local TLS (subdomains + apex)
 #   builder       one-shot pre-builder (registry-api image) — `--profile build`
-#   keycloak      optional OAuth (parity with K8s)          — `--profile keycloak`
 #
 # Quick start:
 #   cp .env.example .env          # set a token
-#   docker compose up -d
+#   docker compose up -d --build
 #   ./build.sh cis_v600 s3-bucket 5.11.0
-#   # add *.conformer.local -> 127.0.0.1 to /etc/hosts, trust caddy CA
+#   # add conformer.local + *.conformer.local -> 127.0.0.1 to /etc/hosts, trust caddy CA
 
 name: conformer
 
@@ -107,18 +106,9 @@ services:
     working_dir: /repo
     entrypoint: ["/repo/compose/build-module.sh"]
 
-  # Optional OAuth, for parity with the K8s stack. Enable with --profile keycloak
-  # and set AUTH_MODE=keycloak in .env.
-  keycloak:
-    profiles: ["keycloak"]
-    image: quay.io/keycloak/keycloak:25.0
-    command: ["start-dev", "--import-realm", "--http-enabled=true", "--hostname-strict=false"]
-    environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
-    volumes:
-      - ./keycloak-realm:/opt/keycloak/data/import:ro
-    restart: unless-stopped
+  # NOTE: the registry API also supports OIDC auth (AUTH_MODE=keycloak) against an
+  # EXTERNAL Keycloak you run yourself — point KEYCLOAK_ISSUER / KEYCLOAK_JWKS_URL
+  # at it. This stack ships static-token auth only (the simple default).
 
 volumes:
   minio-data:

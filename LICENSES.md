@@ -26,9 +26,8 @@ BUSL-licensed or bundled AGPL binaries.
 | Service | License | Notes |
 |---|---|---|
 | [MinIO server](https://github.com/minio/minio) | AGPL-3.0 | run unmodified via the official image — no source obligation; not redistributed by us |
-| [Keycloak](https://github.com/keycloak/keycloak) | Apache-2.0 | optional |
-| [Caddy](https://github.com/caddyserver/caddy) | Apache-2.0 | |
-| nginx-ingress, cert-manager, Tekton (K8s) | Apache-2.0 | |
+| [Caddy](https://github.com/caddyserver/caddy) | Apache-2.0 | wildcard reverse proxy + local TLS |
+| [Keycloak](https://github.com/keycloak/keycloak) | Apache-2.0 | optional, external — only if you run OIDC auth yourself |
 
 ## Decisions that keep us clean
 

@@ -1,42 +1,48 @@
-# Docker Compose deployment (simple)
+# Docker Compose deployment
 
-A single-host alternative to the Kubernetes/Helm stack. Same registry, same
-hardening pipeline, far less to run:
+Conformer runs as a single-host Docker Compose stack — the whole registry plus
+the hardening pipeline, nothing else to operate.
 
-| K8s component | Compose equivalent |
+| Service | Role |
 |---|---|
-| Registry API (Deployment) | `registry-api` container |
-| MinIO (Bitnami chart) | `minio` container + `minio-init` |
-| Keycloak (Bitnami chart) | **dropped by default** — static-token auth; optional `--profile keycloak` |
-| Tekton pipeline | `builder` one-shot container (`./build.sh`) |
-| nginx-ingress + cert-manager | `caddy` (wildcard reverse proxy + auto local TLS) |
+| `registry-api` | Go service: Terraform Module Registry Protocol + the `/m/` direct endpoint; bundles the patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) and builds modules on demand |
+| `minio` | S3-compatible storage for the hardened module zips |
+| `builder` | one-shot pre-builder (`./build.sh`), same image as `registry-api` (`--profile build`) |
+| `caddy` | wildcard reverse proxy + automatic local TLS for `*.conformer.local` (and the apex) |
 
 ## 1. Start the stack
 
 ```bash
 cd compose
 cp .env.example .env          # set STATIC_TOKENS to your own secret
-docker compose up -d
+docker compose up -d --build
 ```
 
-This brings up `registry-api`, `minio`, `minio-init` (creates the `modules`
-bucket), and `caddy`.
+This brings up `registry-api`, `minio` (creates the `modules` bucket on first
+start), and `caddy`.
 
 ## 2a. Dynamic patching (default — no pre-build)
 
 `DYNAMIC_BUILD=true` (default in `.env.example`) means you can request **any**
-upstream module and it is fetched, patched for the subdomain's framework, and
-cached on first use. Just point Terraform/Terragrunt at it — see
-[dynamic patching](../docs/04-dynamic-patching.md):
+upstream module and it is fetched, patched, and cached on first use. Point
+Terraform/Terragrunt at it — see [dynamic patching](../docs/04-dynamic-patching.md):
 
 ```hcl
-source = "cis.conformer.local/Azure/avm-res-automation-automationaccount/azurerm"
+# framework subdomain (gated by token + framework entitlement)
+source  = "cis.conformer.local/Azure/avm-res-automation-automationaccount/azurerm"
 version = "0.2.0"
+```
+
+Or pick an ad-hoc transformation set with no framework (direct go-getter mode,
+ungated):
+
+```hcl
+source = "https://conformer.local/m/Azure/avm-res-automation-automationaccount/azurerm?version=0.2.0&transformation=tags,destroy"
 ```
 
 ## 2b. Pre-build a module (optional)
 
-Warm the cache or run without dynamic mode. Replaces the Tekton PipelineRun:
+Warm the cache or run without dynamic mode:
 
 ```bash
 ./build.sh cis_v600 s3-bucket 5.11.0
@@ -49,11 +55,11 @@ uploads `…/cis_v600/5.11.0.zip` to MinIO.
 ## 3. Local DNS + TLS (one-time)
 
 Terraform requires HTTPS for registry hosts. Caddy serves `*.conformer.local`
-with its internal CA.
+and the apex with its internal CA.
 
 ```bash
-# point the subdomains at localhost
-sudo sh -c 'echo "127.0.0.1 cis.conformer.local iso27001.conformer.local soc2.conformer.local auth.conformer.local" >> /etc/hosts'
+# point the subdomains AND the apex (for direct go-getter mode) at localhost
+sudo sh -c 'echo "127.0.0.1 conformer.local cis.conformer.local iso27001.conformer.local soc2.conformer.local" >> /etc/hosts'
 
 # trust Caddy's local CA so Terraform accepts the cert
 docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
@@ -85,17 +91,19 @@ terraform init    # pulls the CIS-hardened zip from the registry
 terraform plan
 ```
 
-Switch framework = change the subdomain (`soc2.conformer.local`). The token
-must be entitled to that framework in `STATIC_TOKENS`.
+Switch framework = change the subdomain (`soc2.conformer.local`). The token must
+be entitled to that framework in `STATIC_TOKENS`. The direct `/m/` mode (section
+2a) needs no token.
 
 ## Auth modes
 
 - **static** (default) — bearer tokens in `STATIC_TOKENS`, mapped to frameworks.
-  No Keycloak. Service discovery omits the login block; consumers supply the
-  token directly. Simple, good for dev / internal use.
-- **keycloak** — set `AUTH_MODE=keycloak`, run `docker compose --profile keycloak up -d`,
-  drop a realm export in `compose/keycloak-realm/`. Enables `terraform login`
-  and full OIDC entitlement, matching the K8s stack.
+  Service discovery omits the login block; consumers supply the token directly.
+  Simple, good for dev / internal use.
+- **keycloak** (external) — set `AUTH_MODE=keycloak` and point `KEYCLOAK_ISSUER`
+  / `KEYCLOAK_JWKS_URL` at an OIDC IdP you run yourself. The registry validates
+  the JWT against its JWKS and reads framework entitlement from the token. This
+  stack does not bundle an IdP.
 
 ## Quick API check (no Terraform)
 

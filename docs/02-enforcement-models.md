@@ -14,12 +14,12 @@ units drive both models.
 
 ## Model A — registry (server-gated)
 
-The transform runs **once**, at build time, in Tekton. The hardened module is
-zipped, stored in MinIO, and served via the Terraform Module Registry Protocol.
-Consumers use plain `terraform`.
+The transform runs **once**, at build time, in the compose builder (or on demand
+via dynamic build). The hardened module is zipped, stored in MinIO, and served
+via the Terraform Module Registry Protocol. Consumers use plain `terraform`.
 
 ```
-        build time (Tekton)                         consume time
+   build time (compose builder)                     consume time
   ┌──────────────────────────────┐          ┌──────────────────────────┐
   │ fetch upstream @ tag          │          │ terraform / terragrunt   │
   │ → patch (layers 1–4)          │   zip    │   source = cis.conformer │
@@ -43,8 +43,8 @@ Consumers use plain `terraform`.
 
 **Costs**
 
-- Real infrastructure: Kubernetes, MinIO, Keycloak, Tekton, cert-manager,
-  wildcard DNS.
+- A Docker Compose stack — registry-api, MinIO, Caddy (wildcard TLS) — plus
+  wildcard DNS. Auth is static tokens by default (optional external OIDC).
 - Hardening is baked at build; a new control means a new build + version.
 
 **The two consumption modes Model A serves**

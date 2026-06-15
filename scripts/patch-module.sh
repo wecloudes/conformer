@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Canonical layered patcher — the same pipeline the Tekton task runs, packaged
-# as one script so the Docker Compose builder, the on-demand dynamic builder,
-# and anyone with the toolkit image can produce a hardened module.zip.
+# Canonical layered patcher — one script so the Docker Compose builder, the
+# on-demand dynamic builder, and anyone with the registry-api image can produce a
+# hardened module.zip.
 #
 # Compliance content lives in composable TRANSFORMATION UNITS under
 # transformations/<unit>/{_default,<module>}/rules.mptf.hcl. A FRAMEWORK is a
@@ -10,7 +10,7 @@
 # unit list (FRAMEWORK="none" + TRANSFORMATIONS=a,b), then applies each unit's
 # _default rules (any module) then its module-specific rules.
 #
-# Usage (run inside the patch-toolkit image, all tools on PATH):
+# Usage (run inside the registry-api image, all tools on PATH):
 #   patch-module.sh <src_dir> <assets_anchor> <framework> <module> <version> <out_zip>
 #
 #   src_dir        upstream module checkout

@@ -1,7 +1,8 @@
 # Dynamic (on-demand) patching
 
-By default the registry serves modules that were patched ahead of time (Tekton
-or `compose/build.sh`). **Dynamic patching** removes that step: request *any*
+By default the registry serves modules that were patched ahead of time (the
+compose `builder` / `compose/build.sh`). **Dynamic patching** removes that step:
+request *any*
 module through the registry and it is fetched from the upstream Terraform
 registry, patched, cached, and served — the first time it is asked for.
 
@@ -134,16 +135,6 @@ the patch toolkit (`tofu`, `mapotf`, `hcledit`, `git`, `jq`, `gitleaks`, plus
 `sed`/`awk`) along with `scripts/`, `transformations/`, and `frameworks/`, so the
 API can build in-process (uploads go through the minio-go SDK — no `mc`).
 
-**Kubernetes / Helm** (off by default — prefer Tekton pre-builds):
-
-```yaml
-# values.yaml
-registryApi:
-  dynamicBuild:
-    enabled: true
-    upstreamRegistry: registry.terraform.io
-```
-
 ## Direct go-getter path (ad-hoc transformation sets)
 
 Dynamic build also serves a second, framework-less endpoint. Instead of a
@@ -170,12 +161,12 @@ it is gated only by `DIRECT_MODE` (on by default). A worked example lives in
 
 ## Trade-offs
 
-| | Pre-built (Tekton / build.sh) | Dynamic (on demand) |
+| | Pre-built (builder / build.sh) | Dynamic (on demand) |
 |---|---|---|
 | First request latency | none (already cached) | seconds (fetch + patch) |
 | Module coverage | only what you built | **any** upstream module |
 | Curation | explicit per module | automatic via generic transformation units |
-| Build environment | isolated pipeline | inside the API pod/container |
+| Build environment | isolated pipeline | inside the API container |
 
 Notes:
 

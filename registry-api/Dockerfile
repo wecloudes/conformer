@@ -9,10 +9,10 @@ RUN go mod download
 COPY registry-api/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/registry-api .
 
-# Final image carries the patch toolkit so the API can build modules on demand.
-# Tool set mirrors toolkit/Dockerfile.patch-toolkit. All licenses are
-# permissive/weak-copyleft (MPL/MIT/Apache) — no BUSL (Terraform) or bundled
-# AGPL (mc): OpenTofu replaces Terraform, uploads go through the minio-go SDK.
+# Final image carries the patch toolkit so the API can build modules on demand
+# (this is the ONLY toolkit image — the compose builder reuses it too). All
+# licenses are permissive/weak-copyleft (MPL/MIT/Apache) — no BUSL (Terraform)
+# or bundled AGPL (mc): OpenTofu replaces Terraform, uploads use the minio-go SDK.
 FROM alpine:3.19
 ARG OPENTOFU_VERSION=1.12.2
 ARG MAPOTF_VERSION=0.1.4

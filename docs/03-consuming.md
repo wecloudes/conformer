@@ -211,15 +211,16 @@ Notes:
 
 ## CI integration
 
-For Model B in CI, `mapotf` / `terraform` / `jq` must be on PATH. Reuse the same
-[patch toolkit image](01-transformation-techniques.md#the-toolkit-image):
+For Model B in CI, `mapotf` / `terraform` / `jq` must be on PATH. The patch
+toolkit ships inside the `registry-api` image (it bundles all the transform
+tooling), so reuse that image as your CI container:
 
 ```yaml
 # GitHub Actions
 jobs:
   plan:
     runs-on: ubuntu-latest
-    container: your-registry.com/compliance-patch-toolkit:latest
+    container: conformer-registry-api:latest
     steps:
       - uses: actions/checkout@v4
       - run: terragrunt run-all plan --terragrunt-non-interactive
@@ -229,11 +230,19 @@ jobs:
 ```yaml
 # GitLab CI
 compliance-plan:
-  image: your-registry.com/compliance-patch-toolkit:latest
+  image: conformer-registry-api:latest
   script:
     - cd examples/terragrunt/model-b-mapotf
     - terragrunt run-all plan --terragrunt-non-interactive
 ```
 
+If you'd rather not run inside that image, drive the transforms directly from
+the repo scripts — `scripts/apply-transforms.sh` to patch the module and
+`scripts/plan-gate.sh tfplan` to gate the plan — provided `mapotf` /
+`terraform` / `jq` are installed on the runner.
+
 For Model A, no special image is needed — only `terraform`/`terragrunt` plus the
 registry token (`TG_TF_REGISTRY_TOKEN` or a mounted `credentials.tfrc.json`).
+The hardened modules are served by the Docker Compose stack: bring it up from
+`compose/` (`docker compose up`), or pre-build the framework variants ahead of
+time with `compose/build.sh`.
