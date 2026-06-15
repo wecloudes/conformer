@@ -1,0 +1,40 @@
+# Compliance patch toolkit — all transformation tools from the DIY playbook in
+# one image, for the Tekton patch task and the consumer-side (Model B) flow.
+# License-clean: OpenTofu (MPL), mapotf/hcledit/gitleaks (MIT), graft (MPL).
+# No BUSL (Terraform) and no bundled AGPL (mc).
+#
+#   build:  docker build -f patches/Dockerfile.patch-toolkit -t conformer-patch-toolkit:latest patches/
+FROM golang:1.24-alpine AS graftbuild
+RUN CGO_ENABLED=0 GOBIN=/out go install github.com/ms-henglu/graft@v0.2.0
+
+FROM alpine:3.19
+ARG OPENTOFU_VERSION=1.12.2
+ARG HCLEDIT_VERSION=0.2.17
+ARG MAPOTF_VERSION=0.1.4
+ARG GITLEAKS_VERSION=8.30.1
+# TARGETARCH is auto-populated by BuildKit to the build platform (amd64/arm64).
+ARG TARGETARCH
+
+RUN apk add --no-cache bash curl git jq gawk sed unzip zip ca-certificates
+
+# OpenTofu (MPL-2.0) — used for `fmt` and module `get` (replaces Terraform BUSL).
+RUN curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin tofu
+
+# hcledit (slides 27/29/30 — imperative block/attribute edits)
+RUN curl -fsSL "https://github.com/minamijoyo/hcledit/releases/download/v${HCLEDIT_VERSION}/hcledit_${HCLEDIT_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin hcledit
+
+# mapotf (declarative structural transforms — generic all-resource rules)
+RUN curl -fsSL "https://github.com/Azure/mapotf/releases/download/v${MAPOTF_VERSION}/mapotf_${MAPOTF_VERSION}_linux_${TARGETARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin mapotf && chmod +x /usr/local/bin/mapotf
+
+# gitleaks (slide 30 — secret scan after sanitization)
+RUN GL=$([ "${TARGETARCH}" = "arm64" ] && echo arm64 || echo x64); \
+    curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL}.tar.gz" \
+    | tar -xz -C /usr/local/bin gitleaks
+
+# graft (MPL-2.0 — module-specific named overrides + drift absorb)
+COPY --from=graftbuild /out/graft /usr/local/bin/graft
+
+WORKDIR /work

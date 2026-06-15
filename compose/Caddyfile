@@ -1,0 +1,17 @@
+# Wildcard reverse proxy + automatic local TLS for the registry.
+#
+# Every framework subdomain (cis., iso27001., soc2., ...) resolves to the same
+# registry API, which reads the framework from the Host header. Caddy issues a
+# certificate from its internal CA via `tls internal`; trust that CA on the host
+# so Terraform accepts the HTTPS endpoint (see compose/README.md).
+
+*.conformer.local {
+	tls internal
+	reverse_proxy registry-api:8080
+}
+
+# Optional: expose Keycloak when running with --profile keycloak.
+auth.conformer.local {
+	tls internal
+	reverse_proxy keycloak:8080
+}

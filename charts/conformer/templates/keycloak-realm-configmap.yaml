@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: compliance-keycloak-realm
+  labels:
+    {{- include "conformer.labels" . | nindent 4 }}
+data:
+  compliance-realm.json: |
+    {
+      "realm": "compliance",
+      "enabled": true,
+      "displayName": "Compliance Registry",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "sslRequired": "external",
+      "defaultSignatureAlgorithm": "RS256",
+      "accessTokenLifespan": 3600,
+      "ssoSessionIdleTimeout": 86400,
+      "roles": {
+        "realm": [
+          {
+            "name": "framework:cis_v600",
+            "description": "Access to CIS v6.0.0 compliance modules (free tier)"
+          },
+          {
+            "name": "framework:iso27001",
+            "description": "Access to ISO 27001 compliance modules"
+          },
+          {
+            "name": "framework:soc2",
+            "description": "Access to SOC 2 compliance modules"
+          },
+          {
+            "name": "framework:hipaa",
+            "description": "Access to HIPAA compliance modules"
+          },
+          {
+            "name": "framework:pci_dss",
+            "description": "Access to PCI DSS compliance modules"
+          },
+          {
+            "name": "framework:nist_800_53",
+            "description": "Access to NIST 800-53 compliance modules"
+          }
+        ]
+      },
+      "groups": [
+        {
+          "name": "free-tier",
+          "realmRoles": ["framework:cis_v600"]
+        },
+        {
+          "name": "pro-tier",
+          "realmRoles": [
+            "framework:cis_v600",
+            "framework:iso27001",
+            "framework:soc2",
+            "framework:hipaa",
+            "framework:pci_dss",
+            "framework:nist_800_53"
+          ]
+        }
+      ],
+      "defaultGroups": ["free-tier"],
+      "clients": [
+        {
+          "clientId": "terraform-cli",
+          "name": "Terraform CLI",
+          "description": "OAuth2 client for terraform login",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": false,
+          "redirectUris": [
+            "http://localhost:10000/*",
+            "http://localhost:10001/*",
+            "http://localhost:10002/*",
+            "http://localhost:10003/*",
+            "http://localhost:10004/*",
+            "http://localhost:10005/*",
+            "http://localhost:10006/*",
+            "http://localhost:10007/*",
+            "http://localhost:10008/*",
+            "http://localhost:10009/*",
+            "http://localhost:10010/*"
+          ],
+          "webOrigins": ["http://localhost"],
+          "protocol": "openid-connect",
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "access.token.lifespan": "86400"
+          },
+          "protocolMappers": [
+            {
+              "name": "realm-roles",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-realm-role-mapper",
+              "config": {
+                "claim.name": "realm_access.roles",
+                "jsonType.label": "String",
+                "multivalued": "true",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true"
+              }
+            },
+            {
+              "name": "frameworks-claim",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-realm-role-mapper",
+              "config": {
+                "claim.name": "frameworks",
+                "jsonType.label": "String",
+                "multivalued": "true",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "true",
+                "usermodel.realmRoleMapping.rolePrefix": "framework:"
+              }
+            }
+          ]
+        },
+        {
+          "clientId": "tekton-pipeline",
+          "name": "Tekton Pipeline Service Account",
+          "description": "Service account for Tekton pipeline to upload modules",
+          "enabled": true,
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "protocol": "openid-connect",
+          "secret": "changeme-tekton-client-secret"
+        }
+      ],
+      "scopeMappings": [
+        {
+          "client": "terraform-cli",
+          "roles": ["framework:cis_v600"]
+        }
+      ]
+    }

@@ -1,0 +1,165 @@
+{{- if .Values.tekton.enabled }}
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: {{ include "conformer.fullname" . }}-build-module
+  labels:
+    {{- include "conformer.labels" . | nindent 4 }}
+spec:
+  description: >
+    End-to-end pipeline: fetch upstream module -> apply compliance patches -> upload to MinIO.
+    Run once per (module, version, framework) combination.
+  params:
+    - name: module-namespace
+      type: string
+      default: "terraform-aws-modules"
+    - name: module-name
+      type: string
+    - name: module-provider
+      type: string
+      default: "aws"
+    - name: module-version
+      type: string
+    - name: frameworks
+      type: string
+      description: "Comma-separated list of frameworks to build (e.g., cis_v600,iso27001,soc2)"
+      default: "cis_v600,iso27001,soc2"
+  workspaces:
+    - name: shared-workspace
+    - name: patches-workspace
+
+  tasks:
+    - name: fetch-upstream
+      taskRef:
+        name: {{ include "conformer.fullname" . }}-fetch-upstream
+      params:
+        - name: module-namespace
+          value: "$(params.module-namespace)"
+        - name: module-name
+          value: "$(params.module-name)"
+        - name: module-provider
+          value: "$(params.module-provider)"
+        - name: module-version
+          value: "$(params.module-version)"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    # For each framework, patch and upload
+    # Note: Tekton doesn't natively support looping over a list,
+    # so we define one task per framework. For dynamic frameworks,
+    # use a Tekton Custom Task or a wrapper script that creates PipelineRuns.
+    - name: patch-cis
+      runAfter: ["fetch-upstream"]
+      taskRef:
+        name: {{ include "conformer.fullname" . }}-patch-module
+      params:
+        - name: framework
+          value: "cis_v600"
+        - name: module-name
+          value: "$(params.module-name)"
+        - name: module-version
+          value: "$(params.module-version)"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: cis_v600
+        - name: patches
+          workspace: patches-workspace
+
+    - name: upload-cis
+      runAfter: ["patch-cis"]
+      taskRef:
+        name: {{ include "conformer.fullname" . }}-upload-minio
+      params:
+        - name: module-namespace
+          value: "$(params.module-namespace)"
+        - name: module-name
+          value: "$(params.module-name)"
+        - name: module-provider
+          value: "$(params.module-provider)"
+        - name: module-version
+          value: "$(params.module-version)"
+        - name: framework
+          value: "cis_v600"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: cis_v600
+
+    - name: patch-iso27001
+      runAfter: ["fetch-upstream"]
+      taskRef:
+        name: {{ include "conformer.fullname" . }}-patch-module
+      params:
+        - name: framework
+          value: "iso27001"
+        - name: module-name
+          value: "$(params.module-name)"
+        - name: module-version
+          value: "$(params.module-version)"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: iso27001
+        - name: patches
+          workspace: patches-workspace
+
+    - name: upload-iso27001
+      runAfter: ["patch-iso27001"]
+      taskRef:
+        name: {{ include "conformer.fullname" . }}-upload-minio
+      params:
+        - name: module-namespace
+          value: "$(params.module-namespace)"
+        - name: module-name
+          value: "$(params.module-name)"
+        - name: module-provider
+          value: "$(params.module-provider)"
+        - name: module-version
+          value: "$(params.module-version)"
+        - name: framework
+          value: "iso27001"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: iso27001
+
+    - name: patch-soc2
+      runAfter: ["fetch-upstream"]
+      taskRef:
+        name: {{ include "conformer.fullname" . }}-patch-module
+      params:
+        - name: framework
+          value: "soc2"
+        - name: module-name
+          value: "$(params.module-name)"
+        - name: module-version
+          value: "$(params.module-version)"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: soc2
+        - name: patches
+          workspace: patches-workspace
+
+    - name: upload-soc2
+      runAfter: ["patch-soc2"]
+      taskRef:
+        name: {{ include "conformer.fullname" . }}-upload-minio
+      params:
+        - name: module-namespace
+          value: "$(params.module-namespace)"
+        - name: module-name
+          value: "$(params.module-name)"
+        - name: module-provider
+          value: "$(params.module-provider)"
+        - name: module-version
+          value: "$(params.module-version)"
+        - name: framework
+          value: "soc2"
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+          subPath: soc2
+{{- end }}

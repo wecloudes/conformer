@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "conformer.fullname" . }}-api
+  labels:
+    {{- include "conformer.registryLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.registryApi.service.type }}
+  ports:
+    - port: {{ .Values.registryApi.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "conformer.registrySelectorLabels" . | nindent 4 }}

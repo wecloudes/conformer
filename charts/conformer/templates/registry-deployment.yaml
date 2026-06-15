@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "conformer.fullname" . }}-api
+  labels:
+    {{- include "conformer.registryLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.registryApi.replicas }}
+  selector:
+    matchLabels:
+      {{- include "conformer.registrySelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "conformer.registrySelectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/registry-configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+        - name: registry-api
+          image: "{{ .Values.registryApi.image.repository }}:{{ .Values.registryApi.image.tag }}"
+          imagePullPolicy: {{ .Values.registryApi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "conformer.fullname" . }}-config
+          env:
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "conformer.fullname" . }}-minio-creds
+                  key: root-user
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "conformer.fullname" . }}-minio-creds
+                  key: root-password
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.registryApi.resources | nindent 12 }}

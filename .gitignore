@@ -1,0 +1,27 @@
+# local env / secrets
+compose/.env
+compose/caddy-root.crt
+
+# terraform / opentofu
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan
+
+# terragrunt
+**/.terragrunt-cache/
+
+# transient module checkouts (Model B example)
+examples/consumer-side-mapotf/upstream/
+
+# build / patch artifacts
+*.zip
+*.tf.mptfbackup
+registry-api/registry-api
+
+# OS
+.DS_Store
+
+# input design slides (not source)
+Screenshot*.png
