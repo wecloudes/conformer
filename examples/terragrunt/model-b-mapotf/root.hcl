@@ -9,18 +9,21 @@
 locals {
   framework = "cis_v600"
 
-  # Path to this repo's patches/ and scripts/. In a real git repo prefer
-  # get_repo_root(); this relative form works even when not in a git checkout.
+  # Path to this repo's transformations/, frameworks/ and scripts/. In a real git
+  # repo prefer get_repo_root(); this relative form works even when not in a git
+  # checkout.
   repo_root = "${get_parent_terragrunt_dir()}/../../.."
 }
 
 terraform {
   # Patch the freshly-downloaded module copy before tofu/terraform runs.
+  # apply-transforms.sh expands the framework manifest and runs mapotf for each
+  # of its transformation units against the working dir (".").
   before_hook "compliance_patch" {
     commands = ["plan", "apply", "destroy"]
     execute = [
-      "mapotf", "transform", "-r",
-      "--mptf-dir", "${local.repo_root}/patches/${local.framework}/s3-bucket",
+      "bash", "${local.repo_root}/scripts/apply-transforms.sh",
+      "${local.repo_root}", ".", "s3-bucket", "${local.framework}",
     ]
   }
 

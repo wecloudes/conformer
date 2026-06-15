@@ -1,9 +1,10 @@
 # Model B — Direct consumer-side patching (mapotf)
 
 Harden an upstream Terraform module **without forking it and without pushing
-anything to the registry**. The same `rules.mptf.hcl` files the registry build
-pipeline uses (`patches/<framework>/s3-bucket/rules.mptf.hcl`) are applied here
-locally, at plan time.
+anything to the registry**. The same transformation units the registry build
+pipeline uses — the framework's units from `frameworks/<framework>.hcl` (e.g.
+`transformations/aws-s3-public-access/s3-bucket/rules.mptf.hcl`) — are applied
+here locally, at plan time via `scripts/apply-transforms.sh`.
 
 ## How it differs from the registry (Model A)
 

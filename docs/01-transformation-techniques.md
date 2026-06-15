@@ -26,7 +26,7 @@ consumer/CI side in both models.
 The build orchestration is
 [`charts/conformer/templates/tekton/task-patch-module.yaml`](../charts/conformer/templates/tekton/task-patch-module.yaml).
 All tools ship in one image,
-[`patches/Dockerfile.patch-toolkit`](../patches/Dockerfile.patch-toolkit).
+[`toolkit/Dockerfile.patch-toolkit`](../toolkit/Dockerfile.patch-toolkit).
 
 ---
 
@@ -38,17 +38,27 @@ bucket from accidental destruction.
 **Tools:** `hcledit` (imperative) or `mapotf` (declarative). This project uses
 `mapotf` as the primary engine and `hcledit` as a fallback.
 
-**Declarative (mapotf)** — from
-[`patches/cis_v600/s3-bucket/rules.mptf.hcl`](../patches/cis_v600/s3-bucket/rules.mptf.hcl):
+**Declarative (mapotf)** — from the generic `destroy` unit,
+[`transformations/destroy/_default/rules.mptf.hcl`](../transformations/destroy/_default/rules.mptf.hcl).
+Because `prevent_destroy` is a meta-argument valid on *any* resource type, this
+unit is generic (it ships under `_default`, not under a module dir) and hits
+every managed resource:
 
 ```hcl
-data "resource" bucket {
-  resource_type = "aws_s3_bucket"
+data "resource" all_resource {
 }
 
-transform "update_in_place" cis_prevent_destroy {
-  for_each             = try(data.resource.bucket.result.aws_s3_bucket, {})
-  target_block_address = each.value.mptf.block_address
+locals {
+  all_resource_blocks = flatten([
+    for resource_type, resource_blocks in data.resource.all_resource.result : resource_blocks
+  ])
+  all_blocks = flatten([for _, blocks in local.all_resource_blocks : [for b in blocks : b]])
+  all_addrs  = [for b in local.all_blocks : b.mptf.block_address]
+}
+
+transform "update_in_place" prevent_destroy {
+  for_each             = try(toset(local.all_addrs), [])
+  target_block_address = each.value
   asstring {
     lifecycle {
       prevent_destroy = var.prevent_destroy
@@ -78,6 +88,11 @@ resource "aws_s3_bucket" "this" {        resource "aws_s3_bucket" "this" {
 `mapotf` addresses blocks by label (`aws_s3_bucket.this`), so it works even when
 the resource uses `count`/`for_each`. Prefer it when you need to hit *every*
 resource of a type; reach for `hcledit` for a single targeted edit.
+
+`destroy` is one of two **generic** transformation units (the other is `tags`).
+They are separate units, but when both are selected `mapotf`'s
+`update_in_place` merges their lifecycle settings into a *single* `lifecycle`
+block — so the units compose without producing a duplicate block.
 
 ---
 
@@ -128,21 +143,24 @@ because some values are known at source-time and others only at plan-time.
 
 A `variable` with a `validation` block rejects bad input before plan. The
 advisory toggles in
-[`patches/cis_v600/s3-bucket/patch.hcl`](../patches/cis_v600/s3-bucket/patch.hcl)
+[`transformations/aws-s3-checks-cis/s3-bucket/patch.hcl`](../transformations/aws-s3-checks-cis/s3-bucket/patch.hcl)
 are this layer (documentation-grade opt-out flags).
 
-Stronger: `mapotf` *forces* an attribute regardless of caller input. CIS 3.3
-locks all four public-access flags:
+Stronger: `mapotf` *forces* an attribute regardless of caller input. The
+`aws-s3-public-access` unit
+([`transformations/aws-s3-public-access/s3-bucket/rules.mptf.hcl`](../transformations/aws-s3-public-access/s3-bucket/rules.mptf.hcl))
+locks all four public-access flags (CIS 3.3 / ISO A.8.3 / SOC2 CC6.1 require
+this identically, so it lives in one framework-agnostic unit):
 
 ```hcl
-transform "update_in_place" cis_block_public_access {
+transform "update_in_place" block_public_access {
   for_each             = try(data.resource.pab.result.aws_s3_bucket_public_access_block, {})
   target_block_address = each.value.mptf.block_address
   asraw {
     block_public_acls       = true
-    block_public_policy      = true
-    ignore_public_acls       = true
-    restrict_public_buckets  = true
+    block_public_policy     = true
+    ignore_public_acls      = true
+    restrict_public_buckets = true
   }
 }
 ```
@@ -197,6 +215,16 @@ Principal = {                            Principal = {
 }                              ──►        }
 ```
 
+**AWS-gated.** The account-id / region rewrite only makes sense for modules that
+use the AWS provider — the rewritten references point at
+`data.aws_caller_identity.current` and `data.aws_region.current`, which a
+non-AWS (e.g. Azure) module has no provider for. The
+[`aws-secure-defaults`](../transformations/aws-secure-defaults/_default/aws-datasources.mptf.hcl)
+unit therefore *gates* the rewrite: it injects those data sources (and so opts a
+module into the rewrite) **only** when the module actually declares `aws_*`
+resources, and only when they aren't already declared. A pure-Azure module is
+left untouched — no dangling references, no spurious AWS provider dependency.
+
 ---
 
 ## The toolkit image
@@ -205,8 +233,8 @@ Every tool above lives in one image so the pipeline (and any consumer) has a
 consistent environment:
 
 ```bash
-docker build -f patches/Dockerfile.patch-toolkit \
-  -t compliance-patch-toolkit:latest patches/
+docker build -f toolkit/Dockerfile.patch-toolkit \
+  -t compliance-patch-toolkit:latest toolkit/
 ```
 
 Contents (pinned versions, set as `ARG`s in the Dockerfile):
@@ -235,14 +263,30 @@ when `GITLEAKS_STRICT=true`. Third-party modules routinely trip the scanner on
 example fixtures (`examples/*.pfx`, sample passwords), so the default is
 report-only; enable strict mode for curated first-party modules.
 
-## Adding a framework or module
+## Adding a transformation unit or framework
 
-1. Create `patches/<framework>/<module>/rules.mptf.hcl` (structural enforcement)
-   and optionally `patch.hcl` (advisory toggles).
-2. Add the framework subdomain mapping in
-   [`registry-api/main.go`](../registry-api/main.go) (`frameworkMap`) and a
-   Keycloak role `framework:<name>`.
-3. Add patch + upload tasks for it in
+Rules are organized as **atomic, composable transformation units** under
+[`transformations/`](../transformations/), and a **framework** is a named
+*bundle* of those units declared in [`frameworks/`](../frameworks/). To extend
+the catalog:
+
+1. **Add a unit.** Create `transformations/<unit>/_default/rules.mptf.hcl` for a
+   generic rule that applies to any module, or
+   `transformations/<unit>/<module>/rules.mptf.hcl` for a module-specific rule
+   (the `<module>/` path mirrors the upstream module's directory layout, e.g.
+   `<unit>/rds/modules/db_instance/`). Add a sibling `patch.hcl` for advisory
+   toggles where useful.
+2. **Add or extend a framework** by editing/creating `frameworks/<framework>.hcl`
+   — a manifest with `description = "..."` and
+   `transformations = ["unit-a", "unit-b", ...]`. The build engine
+   [`scripts/patch-module.sh`](../scripts/patch-module.sh) expands the manifest
+   and applies each listed unit; units with no rules for the module being built
+   are simply skipped. (The same script also accepts `TRANSFORMATIONS=a,b`
+   directly for ad-hoc sets — the units are identical either way.)
+3. For a new registry **subdomain**, add the framework mapping in
+   [`registry-api/main.go`](../registry-api/main.go) (`frameworkMap`, e.g.
+   `cis → cis_v600`) and a Keycloak role `framework:<name>`, then wire patch +
+   upload tasks in
    [`pipeline.yaml`](../charts/conformer/templates/tekton/pipeline.yaml).
 
-The same `rules.mptf.hcl` is reused by Model B with no changes.
+The same units are reused by Model B with no changes.

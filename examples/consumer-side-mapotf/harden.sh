@@ -12,11 +12,10 @@ FRAMEWORK="${1:-cis_v600}"
 VERSION="${2:-5.11.0}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/../.." && pwd)"
-RULES_DIR="${REPO_ROOT}/patches/${FRAMEWORK}/s3-bucket"
 UPSTREAM="${HERE}/upstream"
 
 command -v mapotf >/dev/null || { echo "mapotf not installed: github.com/Azure/mapotf"; exit 1; }
-[ -f "${RULES_DIR}/rules.mptf.hcl" ] || { echo "no rules for framework ${FRAMEWORK}"; exit 1; }
+[ -f "${REPO_ROOT}/frameworks/${FRAMEWORK}.hcl" ] || { echo "no framework manifest ${FRAMEWORK}"; exit 1; }
 
 # 1. Fetch upstream module into ./upstream (no fork — a transient local copy).
 if [ ! -d "${UPSTREAM}" ]; then
@@ -26,9 +25,11 @@ if [ ! -d "${UPSTREAM}" ]; then
   rm -rf "${UPSTREAM}/.git"
 fi
 
-# 2. Apply the SAME mapotf rules the registry pipeline uses — but right here.
-echo "=== mapotf transform (${FRAMEWORK}) ==="
-( cd "${UPSTREAM}" && mapotf transform -r --mptf-dir "${RULES_DIR}" )
+# 2. Apply the SAME transformation units the registry pipeline uses — but right
+#    here. apply-transforms.sh expands the framework manifest and runs mapotf for
+#    each unit (generic _default + the s3-bucket bindings) against the checkout.
+echo "=== apply transformations (${FRAMEWORK}) ==="
+"${REPO_ROOT}/scripts/apply-transforms.sh" "${REPO_ROOT}" "${UPSTREAM}" s3-bucket "${FRAMEWORK}"
 
 # 3. Plan against the patched local module.
 echo "=== terraform plan ==="

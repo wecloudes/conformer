@@ -88,7 +88,7 @@ services:
   # One-shot pre-builder — replaces Tekton. Reuses the registry-api image
   # (bundles tofu/mapotf/hcledit/gitleaks + the registry-api binary for uploads).
   # Run via ./build.sh (profile keeps it out of `up`). Mounts the repo so it
-  # sees the current patches/ and scripts/.
+  # sees the current transformations/, frameworks/ and scripts/.
   builder:
     profiles: ["build"]
     image: conformer-registry-api:latest

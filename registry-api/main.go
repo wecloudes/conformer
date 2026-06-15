@@ -57,7 +57,7 @@ type Config struct {
 	DynamicBuild     bool
 	UpstreamRegistry string // e.g. "registry.terraform.io"
 	BuildScript      string // path to build-dynamic.sh inside the image
-	PatchesDir       string // path to the patches/ tree inside the image
+	PatchesDir       string // assets anchor; its parent holds transformations/ + frameworks/
 
 	// DirectMode enables the go-getter "direct" endpoint (/m/...): an ad-hoc,
 	// framework-less transformation set selected via ?transformation=a,b. Open

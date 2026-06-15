@@ -25,7 +25,8 @@ metadata:
   labels:
     {{- include "conformer.labels" . | nindent 4 }}
 data:
-  # Patches are loaded from the patches/ directory at build time.
+  # Transformation units + framework manifests are loaded from transformations/
+  # and frameworks/ at build time.
   # For production, consider using a PVC or Git clone instead.
   # This ConfigMap serves as a bootstrap / example.
   placeholder: "true"

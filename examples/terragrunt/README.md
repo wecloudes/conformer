@@ -1,7 +1,8 @@
 # Terragrunt integration
 
 Two ways to consume compliance-hardened modules from Terragrunt. Both reuse the
-same framework definitions in `patches/<framework>/s3-bucket/`.
+same compliance content — the transformation units bundled by
+`frameworks/<framework>.hcl` (e.g. `transformations/aws-s3-public-access/s3-bucket/`).
 
 ```
 model-a-registry/        # pull hardened module via tfr:// (server-gated)

@@ -3,7 +3,7 @@
 # License-clean: OpenTofu (MPL), mapotf/hcledit/gitleaks (MIT).
 # No BUSL (Terraform) and no bundled AGPL (mc).
 #
-#   build:  docker build -f patches/Dockerfile.patch-toolkit -t conformer-patch-toolkit:latest patches/
+#   build:  docker build -f toolkit/Dockerfile.patch-toolkit -t conformer-patch-toolkit:latest toolkit/
 FROM alpine:3.19
 ARG OPENTOFU_VERSION=1.12.2
 ARG HCLEDIT_VERSION=0.2.17

@@ -1,6 +1,6 @@
-# Build context is the REPO ROOT (so scripts/ and patches/ are available for
-# dynamic, on-demand patching). In Compose: build.context: .. , dockerfile:
-# registry-api/Dockerfile.
+# Build context is the REPO ROOT (so scripts/, transformations/ and frameworks/
+# are available for dynamic, on-demand patching). In Compose: build.context: .. ,
+# dockerfile: registry-api/Dockerfile.
 
 FROM golang:1.24-alpine AS gobuild
 WORKDIR /app
@@ -10,7 +10,7 @@ COPY registry-api/ .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/registry-api .
 
 # Final image carries the patch toolkit so the API can build modules on demand.
-# Tool set mirrors patches/Dockerfile.patch-toolkit. All licenses are
+# Tool set mirrors toolkit/Dockerfile.patch-toolkit. All licenses are
 # permissive/weak-copyleft (MPL/MIT/Apache) — no BUSL (Terraform) or bundled
 # AGPL (mc): OpenTofu replaces Terraform, uploads go through the minio-go SDK.
 FROM alpine:3.19
@@ -36,7 +36,6 @@ RUN GL=$([ "${TARGETARCH}" = "arm64" ] && echo arm64 || echo x64); \
 
 COPY --from=gobuild /out/registry-api /usr/local/bin/registry-api
 COPY scripts/ /app/scripts/
-COPY patches/ /app/patches/
 COPY transformations/ /app/transformations/
 COPY frameworks/ /app/frameworks/
 RUN chmod +x /app/scripts/*.sh

@@ -4,9 +4,12 @@
 
 Conformer is a framework-aware Terraform/OpenTofu module registry that transforms
 upstream modules to a compliance framework (CIS, ISO 27001, SOC 2, …) on the fly.
-Point Terraform at a framework subdomain and Conformer fetches the upstream
-module, applies the framework's structural patches, and serves the hardened
-result — either pre-built or patched on demand. Inspired by
+Compliance content is decomposed into atomic, composable **transformation units**;
+a **framework** is just a named bundle of those units. Point Terraform at a
+framework subdomain and Conformer fetches the upstream module, expands the
+framework to its unit list, applies them, and serves the hardened result — either
+pre-built or patched on demand. The same hardened module is also reachable
+ad-hoc via a direct go-getter URL that names the units inline. Inspired by
 [compliance.tf](https://compliance.tf), built entirely on open-source components
 (permissive / weak-copyleft only — see [LICENSES.md](LICENSES.md)).
 
@@ -54,8 +57,8 @@ Tekton Pipelines
 1. Framework subdomains (`cis.conformer.local`, `iso27001.conformer.local`) all resolve to the same ingress
 2. The Registry API extracts the framework from the `Host` header
 3. Validates the Bearer token against Keycloak JWKS, checks framework entitlement
-4. Returns a presigned MinIO URL for the compliance-patched module zip
-5. Terraform downloads and uses the patched module transparently
+4. Expands the framework manifest to its transformation-unit list, builds (or reuses) the hardened zip
+5. Returns a presigned MinIO URL and Terraform downloads / uses the patched module transparently
 
 ## Module transformation
 
@@ -64,18 +67,70 @@ documentation. The build applies the DIY transformation playbook in layers:
 
 | Layer | Tool | What it does |
 |---|---|---|
-| Sanitization | `sed` + `gitleaks` | strip hardcoded account IDs / regions, fail on leaked secrets |
+| Sanitization | `sed` + `gitleaks` | strip hardcoded account IDs / regions (AWS-provider modules only), fail on leaked secrets |
 | Block removal | `awk` brace-counter | strip injected `provisioner` / `local-exec` blocks |
 | Structural | `mapotf` + `hcledit` | inject `lifecycle { prevent_destroy }`, override insecure attributes (e.g. force public-access flags shut), add plan-time `check` blocks |
 | Advisory toggles | `variable { validation }` | source-time opt-out flags per control |
 | Plan-time gate | `terraform show -json` + `jq` | assert caller config satisfies controls at plan time (`scripts/plan-gate.sh`) |
 
-The structural layer is driven by per-framework
-[`mapotf`](https://github.com/Azure/mapotf) rules at
-`patches/<framework>/<module>/rules.mptf.hcl`. All tools ship in one image
-built from `patches/Dockerfile.patch-toolkit` (set as `tekton.patchImage`).
+The structural layer is driven by composable **transformation units**: atomic
+[`mapotf`](https://github.com/Azure/mapotf) rule sets at
+`transformations/<unit>/{_default,<module>}/rules.mptf.hcl`, where `_default/`
+holds generic rules that apply to *any* module and `<module>/` holds
+module-specific rules that mirror the upstream module's directory layout (e.g.
+`<unit>/rds/modules/db_instance/`). A **framework** is a named bundle of units,
+declared in `frameworks/<framework>.hcl` with a `description` and a
+`transformations = [...]` list. The build engine `scripts/patch-module.sh`
+either expands a framework manifest to its unit list, or takes an explicit
+`TRANSFORMATIONS=a,b` env list — both feed the same engine. All tools ship in
+one image built from `toolkit/Dockerfile.patch-toolkit` (set as
+`tekton.patchImage`).
 
-### Two ways to patch
+The transformation-unit vocabulary:
+
+| Unit | Kind | What it does |
+|---|---|---|
+| `destroy` | generic | `prevent_destroy` on all resources |
+| `tags` | generic | `ignore_changes = [tags]` on resources that have tags |
+| `avm-secure-defaults` | generic | Azure AVM secure variable defaults |
+| `aws-secure-defaults` | generic | terraform-aws-modules secure variable defaults + aws data-source injection |
+| `aws-s3-public-access` | AWS structural | harden S3 public-access settings |
+| `aws-rds-harden` | AWS structural | harden RDS instances |
+| `aws-eks-audit-logs` | AWS structural | enable EKS audit logging |
+| `aws-vpc-flow-logs` | AWS structural | enable VPC flow logs |
+| `aws-s3-checks-cis` / `aws-s3-checks-iso27001` / `aws-s3-checks-soc2` | framework S3 plan-time checks | per-framework S3 `check` blocks |
+
+### Two ways to consume
+
+Both modes serve the **same** hardened module — they differ only in how the
+transformation set is chosen and whether the request is gated.
+
+- **Framework subdomain (registry protocol):** Terraform Module Registry
+  Protocol, gated by token + framework entitlement. The framework names the
+  bundle of units; the subdomain selects the framework. Uses a registry source
+  with a separate `version` argument:
+
+  ```hcl
+  source  = "cis.conformer.local/<ns>/<name>/<provider>"
+  version = "5.11.0"
+  ```
+
+  Subdomains: `cis` / `iso27001` / `soc2`.
+
+- **Direct go-getter mode (ad-hoc, open):** framework-less and ungated — a
+  convenience, not a control. The transformation set rides the query string of a
+  go-getter HTTP source, so there is **no** `version =` argument (the version is
+  a query param). Unit names are sanitized to `[A-Za-z0-9_-]` and are
+  order-independent (canonical cache key):
+
+  ```hcl
+  source = "https://conformer.local/m/<ns>/<name>/<provider>?version=X&transformation=tags,destroy"
+  ```
+
+  This is **not** the registry protocol — no `terraform login`, no entitlement.
+  See [`examples/direct-transform/`](examples/direct-transform/).
+
+These map onto the enforcement spectrum:
 
 - **Model A — registry (this chart):** transform runs once in Tekton, the
   hardened zip is stored in MinIO and served via the Registry Protocol.
@@ -276,18 +331,29 @@ spec:
 EOF
 ```
 
-### Adding new modules
+### Adding rules for a new module
 
-1. Create patch files in `patches/{framework}/{module-name}/patch.hcl`
+1. Add module-specific rules to the relevant transformation unit(s):
+   `transformations/{unit}/{module}/rules.mptf.hcl` (mirroring the upstream
+   module's dir layout), with an optional `patch.hcl` advisory toggle in the
+   unit dir. Generic rules live under `transformations/{unit}/_default/`.
 2. Update the CronJob module list in `values.yaml` or the trigger ConfigMap
 3. Run the pipeline manually or wait for the next scheduled check
 
-### Adding new frameworks
+### Adding a new transformation unit
 
-1. Add framework to `values.yaml` under `frameworks`
-2. Add Keycloak role `framework:{name}` to the realm configuration
-3. Create patch directory `patches/{framework}/`
-4. Add pipeline tasks in `pipeline.yaml` (or use dynamic approach)
+1. Create `transformations/{unit}/` with `_default/` and/or per-module
+   `rules.mptf.hcl` (plus an optional `patch.hcl` for advisory toggles)
+2. Reference the unit from one or more framework manifests' `transformations`
+   list, or apply it ad-hoc via `TRANSFORMATIONS=` / the direct go-getter query
+
+### Adding a new framework
+
+1. Create `frameworks/{name}.hcl` with a `description` and a
+   `transformations = [...]` bundle of unit names
+2. Add the framework to `values.yaml` under `frameworks`
+3. Add Keycloak role `framework:{name}` to the realm configuration
+4. Wire the subdomain through the ingress (or use the dynamic approach)
 
 ## Project Structure
 
@@ -308,21 +374,32 @@ conformer/
 │   ├── main.go
 │   ├── go.mod
 │   └── Dockerfile
-├── patches/                        # Compliance patches per framework
-│   ├── Dockerfile.patch-toolkit    # mapotf+hcledit+terraform+jq+gitleaks image
-│   ├── cis_v600/
-│   │   ├── _default/rules.mptf.hcl # GENERIC rules — applied to ANY module
-│   │   └── s3-bucket/
-│   │       ├── rules.mptf.hcl      # module-specific structural transforms
-│   │       └── patch.hcl           # advisory validation toggles (source-time)
-│   ├── iso27001/
-│   └── soc2/
+├── transformations/                # Atomic, composable transformation units
+│   ├── destroy/                    # generic: prevent_destroy on all resources
+│   │   └── _default/rules.mptf.hcl
+│   ├── tags/                       # generic: ignore_changes=[tags]
+│   ├── avm-secure-defaults/        # generic: Azure AVM secure defaults
+│   ├── aws-secure-defaults/        # generic: aws-modules secure defaults + data sources
+│   ├── aws-s3-public-access/       # AWS structural
+│   │   └── s3-bucket/rules.mptf.hcl  # mirrors the upstream module dir layout
+│   ├── aws-rds-harden/             # AWS structural
+│   ├── aws-eks-audit-logs/         # AWS structural
+│   ├── aws-vpc-flow-logs/          # AWS structural
+│   └── aws-s3-checks-{cis,iso27001,soc2}/  # per-framework S3 plan-time checks
+├── frameworks/                     # Named bundles of transformation units
+│   ├── cis_v600.hcl                # description + transformations = [...]
+│   ├── iso27001.hcl
+│   └── soc2.hcl
+├── toolkit/
+│   └── Dockerfile.patch-toolkit    # opentofu+mapotf+hcledit+jq+gitleaks image
 ├── scripts/
-│   ├── patch-module.sh             # canonical layered patcher (generic + specific)
+│   ├── patch-module.sh             # build engine: framework manifest OR TRANSFORMATIONS=a,b
+│   ├── apply-transforms.sh         # Model B: apply a framework's units in place
 │   ├── build-dynamic.sh            # on-demand: fetch upstream + patch + cache
 │   └── plan-gate.sh                # plan-time jq compliance gate
 └── examples/
     ├── consumer-side-mapotf/       # Model B: patch directly, no registry/fork
+    ├── direct-transform/           # Direct go-getter mode: ad-hoc, framework-less
     └── terragrunt/                 # Terragrunt: tfr:// (A) + before_hook (B)
 ```
 
@@ -333,7 +410,7 @@ approach (Model B).
 ### Build the patch toolkit image
 
 ```bash
-docker build -f patches/Dockerfile.patch-toolkit \
-  -t compliance-patch-toolkit:latest patches/
+docker build -f toolkit/Dockerfile.patch-toolkit \
+  -t compliance-patch-toolkit:latest toolkit/
 # push to your registry, then set tekton.patchImage in values.yaml
 ```
