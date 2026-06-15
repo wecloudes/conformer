@@ -8,8 +8,7 @@ gives the **control**, the **resource**, the **rule**, and the **effect**.
 | You want to… | Engine | Where |
 |---|---|---|
 | Touch **every** resource (or every resource of a type) in any module | **mapotf** (`data "resource"` + `for_each`) | `patches/<fw>/_default/rules.mptf.hcl` |
-| Touch **one named** resource in a specific module | **graft** `override` or mapotf with an explicit address | `patches/<fw>/<module>/…` |
-| Reconcile **drift** a plan shows (tags added by policy, portal edits) | **graft absorb** (reads `plan.json`) | consumer/CI side |
+| Touch **one named** resource in a specific module | **mapotf** with an explicit `target_block_address` | `patches/<fw>/<module>/…` |
 
 Three questions decide a rule: **which resource** (type or address), **which
 attribute/block**, and **force it** (override caller) vs **assert it** (fail at
@@ -164,21 +163,32 @@ plan-gate) over forcing — see §10.
 ## 8. Mandatory tags (merge, don't clobber)
 
 **Control:** governance / cost allocation. Add org tags while preserving the
-module's own — this is where graft's `graft.source` shines:
+module's own. Do it with a mapotf `update_in_place` that re-emits `tags` wrapped
+in `merge()`, so the module's existing tag source is kept:
 
 ```hcl
-# graft manifest (module-specific): merge, keep existing tags
-module "x" {
-  override {
-    resource "azurerm_storage_account" "this" {
-      tags = merge(graft.source, {
-        owner               = "platform"
-        data_classification = "internal"
-      })
-    }
+# patches/<fw>/<module>/rules.mptf.hcl — merge org tags, keep existing
+data "resource" sa {
+  resource_type = "azurerm_storage_account"
+}
+
+transform "update_in_place" merge_org_tags {
+  for_each             = try(data.resource.sa.result.azurerm_storage_account, {})
+  target_block_address = each.value.mptf.block_address
+
+  asraw {
+    tags = merge(var.tags, {
+      owner               = "platform"
+      data_classification = "internal"
+    })
   }
 }
 ```
+
+> Preserving the module's own tags depends on the module passing a `tags`
+> variable (`var.tags`) through to the resource — the common AVM / terraform-aws
+> convention. If a module hardcodes literal tags on the block, target that
+> resource explicitly and reproduce the literals in the `merge()` first arg.
 
 ## 9. Removal & sanitization
 
@@ -187,7 +197,7 @@ module "x" {
 - `provisioner` / `local-exec` blocks → removed (awk, in `patch-module.sh`).
 - hardcoded account IDs / regions → `data.aws_caller_identity` / `data.aws_region` (sed).
 - secrets → `gitleaks` (report or block).
-- a deprecated/insecure attribute → `remove_block_element` (mapotf) or graft removal.
+- a deprecated/insecure attribute → `remove_block_element` (mapotf).
 
 ## 10. Plan-time assertions (when you can't force)
 
@@ -281,7 +291,6 @@ a hardcoded ARN, skipped on an AVM module.
 | Every module, every framework | `patches/<fw>/_default/rules.mptf.hcl` |
 | One module, one framework | `patches/<fw>/<module>/rules.mptf.hcl` (+ `patch.hcl` toggles) |
 | Plan-time gate | `scripts/plan-gate.sh` |
-| Drift reconciliation | `graft absorb` (consumer/CI) |
 
 ---
 

@@ -20,6 +20,9 @@ examples/consumer-side-mapotf/upstream/
 *.tf.mptfbackup
 registry-api/registry-api
 
+# code intelligence index (local, not source)
+.codegraph/
+
 # OS
 .DS_Store
 

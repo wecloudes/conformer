@@ -109,7 +109,7 @@ UPSTREAM_REGISTRY=registry.terraform.io
 ```
 
 The `registry-api` image is built from `registry-api/Dockerfile`, which bakes in
-the patch toolkit (`tofu`, `mapotf`, `graft`, `git`, `jq`) plus `scripts/` and
+the patch toolkit (`tofu`, `mapotf`, `hcledit`, `git`, `jq`) plus `scripts/` and
 `patches/`, so the API can build in-process (uploads go through the minio-go SDK
 — no `mc`).
 

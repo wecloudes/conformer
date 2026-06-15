@@ -215,7 +215,6 @@ Contents (pinned versions, set as `ARG`s in the Dockerfile):
 |---|---|---|
 | OpenTofu | 1.12.2 | MPL-2.0 |
 | mapotf | 0.1.4 | MIT |
-| graft | 0.2.0 (from source) | MPL-2.0 |
 | hcledit | 0.2.17 | MIT |
 | gitleaks | 8.30.1 | MIT |
 

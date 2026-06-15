@@ -49,7 +49,7 @@ ingress:
 tekton:
   enabled: true
   schedule: "0 6 * * *"  # Daily 6am UTC check for upstream releases
-  # Patch toolkit: opentofu + mapotf + graft + hcledit + jq + gitleaks + awk/sed.
+  # Patch toolkit: opentofu + mapotf + hcledit + jq + gitleaks + awk/sed.
   # Build from patches/Dockerfile.patch-toolkit and push to your registry.
   patchImage: conformer-patch-toolkit:latest
   workspace:

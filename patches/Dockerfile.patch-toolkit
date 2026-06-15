@@ -1,12 +1,9 @@
 # Compliance patch toolkit — all transformation tools from the DIY playbook in
 # one image, for the Tekton patch task and the consumer-side (Model B) flow.
-# License-clean: OpenTofu (MPL), mapotf/hcledit/gitleaks (MIT), graft (MPL).
+# License-clean: OpenTofu (MPL), mapotf/hcledit/gitleaks (MIT).
 # No BUSL (Terraform) and no bundled AGPL (mc).
 #
 #   build:  docker build -f patches/Dockerfile.patch-toolkit -t conformer-patch-toolkit:latest patches/
-FROM golang:1.24-alpine AS graftbuild
-RUN CGO_ENABLED=0 GOBIN=/out go install github.com/ms-henglu/graft@v0.2.0
-
 FROM alpine:3.19
 ARG OPENTOFU_VERSION=1.12.2
 ARG HCLEDIT_VERSION=0.2.17
@@ -33,8 +30,5 @@ RUN curl -fsSL "https://github.com/Azure/mapotf/releases/download/v${MAPOTF_VERS
 RUN GL=$([ "${TARGETARCH}" = "arm64" ] && echo arm64 || echo x64); \
     curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL}.tar.gz" \
     | tar -xz -C /usr/local/bin gitleaks
-
-# graft (MPL-2.0 — module-specific named overrides + drift absorb)
-COPY --from=graftbuild /out/graft /usr/local/bin/graft
 
 WORKDIR /work
