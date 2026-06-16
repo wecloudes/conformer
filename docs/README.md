@@ -29,6 +29,11 @@ Read in order:
    removal, assertions) mapped to controls and provider resources. **Start here
    if you're authoring rules.**
 
+6. **[Production deployment](06-production-deployment.md)** — *making it
+   accessible*: real DNS + TLS (Let's Encrypt wildcard or a corporate CA), the
+   host-reachable storage endpoint for presigned downloads, firewalling, and
+   multi-tenant auth.
+
 ## Background
 
 The transformation techniques come from a "DIY playbook" — given an upstream
@@ -74,3 +79,4 @@ Two ways to pull a hardened module from a running registry:
 | [`examples/consumer-side-mapotf/`](../examples/consumer-side-mapotf/) | Model B with plain Terraform — patch upstream locally, no registry |
 | [`examples/terragrunt/model-a-registry/`](../examples/terragrunt/model-a-registry/) | Model A with Terragrunt — `tfr://` registry source |
 | [`examples/terragrunt/model-b-mapotf/`](../examples/terragrunt/model-b-mapotf/) | Model B with Terragrunt — `before_hook` mapotf |
+| [`examples/terragrunt/catalog/`](../examples/terragrunt/catalog/) | A multi-unit Terragrunt **catalog** of hardened modules (`tfr://`) — the drop-in pattern for a live infra repo, with org-wide framework switch |
