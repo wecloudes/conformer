@@ -17,7 +17,7 @@ import (
 // buildTimeout caps a single on-demand build (fetch + patch + upload).
 const buildTimeout = 8 * time.Minute
 
-// ensureBuilt guarantees that objectKey exists in MinIO, building it on demand
+// ensureBuilt guarantees that objectKey exists in the S3 store, building it on demand
 // if missing. Concurrent requests for the same key are serialized so the module
 // is fetched and patched exactly once.
 //
@@ -32,7 +32,7 @@ func (s *Server) ensureBuilt(ctx context.Context, namespace, name, provider, ver
 	defer mu.Unlock()
 
 	// Re-check after acquiring the lock — another request may have built it.
-	if _, err := s.minioClient.StatObject(ctx, s.config.MinioBucket, objectKey, minio.StatObjectOptions{}); err == nil {
+	if _, err := s.s3Client.StatObject(ctx, s.config.S3Bucket, objectKey, minio.StatObjectOptions{}); err == nil {
 		return nil
 	}
 
@@ -67,7 +67,7 @@ func (s *Server) ensureBuilt(ctx context.Context, namespace, name, provider, ver
 	}
 	log.Printf("dynamic build OK %s\n%s", objectKey, out)
 
-	if uerr := uploadObject(bctx, s.minioClient, s.config.MinioBucket, objectKey, zipPath); uerr != nil {
+	if uerr := uploadObject(bctx, s.s3Client, s.config.S3Bucket, objectKey, zipPath); uerr != nil {
 		return fmt.Errorf("upload: %w", uerr)
 	}
 	return nil

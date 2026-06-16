@@ -25,7 +25,7 @@ BUSL-licensed or bundled AGPL binaries.
 
 | Service | License | Notes |
 |---|---|---|
-| [MinIO server](https://github.com/minio/minio) | AGPL-3.0 | run unmodified via the official image — no source obligation; not redistributed by us |
+| [versitygw](https://github.com/versity/versitygw) (Versity S3 Gateway) | Apache-2.0 | S3 storage, POSIX backend — replaced MinIO (AGPL) so the stack ships no AGPL |
 | [Caddy](https://github.com/caddyserver/caddy) | Apache-2.0 | wildcard reverse proxy + local TLS |
 | [Keycloak](https://github.com/keycloak/keycloak) | Apache-2.0 | optional, external — only if you run OIDC auth yourself |
 
@@ -38,9 +38,10 @@ BUSL-licensed or bundled AGPL binaries.
   Terraform registry serves (OpenTofu's own registry does not mirror everything,
   e.g. Azure AVM). Provider resolution is avoided on the build path
   (`SKIP_VALIDATE` default) so the OpenTofu provider registry is never required.
-- **No bundled `mc`.** MinIO's `mc` CLI is AGPL-3.0. We do not bundle it; uploads
-  go through the **minio-go SDK (Apache-2.0)** from the registry-api binary
-  (`registry-api upload`), and the bucket is created on startup via the SDK.
-- **MinIO server** stays AGPL but is run as an unmodified upstream image; running
-  (not modifying/redistributing) AGPL software carries no source obligation. Swap
-  for any S3-compatible backend if even that is unacceptable in your context.
+- **S3 storage: versitygw, not MinIO.** MinIO server is AGPL-3.0; we use the
+  **Versity S3 Gateway (Apache-2.0)** instead, so the running stack ships **no
+  AGPL** at all. Its POSIX backend maps buckets to directories.
+- **No bundled `mc`.** MinIO's `mc` CLI is AGPL-3.0; we never used it. The S3
+  client is the **minio-go SDK (Apache-2.0)** — a generic S3 client library, not
+  the MinIO server — so uploads (`registry-api upload`) and the startup bucket
+  create go through the SDK against versitygw (or any S3-compatible endpoint).

@@ -6,7 +6,7 @@ the hardening pipeline, nothing else to operate.
 | Service | Role |
 |---|---|
 | `registry-api` | Go service: Terraform Module Registry Protocol + the `/m/` direct endpoint; bundles the patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) and builds modules on demand |
-| `minio` | S3-compatible storage for the hardened module zips |
+| `versitygw` | Versity S3 Gateway (Apache-2.0) — S3 storage for the hardened module zips (POSIX backend) |
 | `builder` | one-shot pre-builder (`./build.sh`), same image as `registry-api` (`--profile build`) |
 | `caddy` | wildcard reverse proxy + automatic local TLS for `*.conformer.local` (and the apex) |
 
@@ -18,8 +18,8 @@ cp .env.example .env          # set STATIC_TOKENS to your own secret
 docker compose up -d --build
 ```
 
-This brings up `registry-api`, `minio` (creates the `modules` bucket on first
-start), and `caddy`.
+This brings up `registry-api`, `versitygw`, and `caddy` (the registry-api creates
+the `modules` bucket in versitygw on first start, retrying until it is up).
 
 ## 2a. Dynamic patching (default — no pre-build)
 
