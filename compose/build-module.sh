@@ -36,7 +36,7 @@ SRC="$(realpath "$(jq -r '.Modules[] | select(.Key=="m") | .Dir' .terraform/modu
 echo "### patch (layered pipeline)"
 "${REPO}/scripts/patch-module.sh" "${SRC}" "${REPO}/patches" "${FRAMEWORK}" "${MODULE}" "${VERSION}" "${ZIP}"
 
-echo "### upload to MinIO (registry-api upload)"
+echo "### upload to S3 store (registry-api upload)"
 KEY="${NAMESPACE}/${MODULE}/${PROVIDER}/${FRAMEWORK}/${VERSION}.zip"
 registry-api upload "${ZIP}" "${KEY}"
-echo "### done: ${MINIO_BUCKET}/${KEY}"
+echo "### done: ${S3_BUCKET}/${KEY}"

@@ -1,8 +1,8 @@
 # Docker Compose — the single-host stack that runs the whole registry.
 #
 #   registry-api  Go service (Terraform Registry Protocol + /m/ direct endpoint),
-#                 bundled patch toolkit; ensures the MinIO bucket on startup
-#   minio         S3-compatible storage for hardened module zips
+#                 bundled patch toolkit; ensures the S3 bucket on startup
+#   versitygw     S3 storage (Versity S3 Gateway, Apache-2.0) for module zips
 #   caddy         wildcard reverse proxy + automatic local TLS (subdomains + apex)
 #   builder       one-shot pre-builder (registry-api image) — `--profile build`
 #
@@ -24,17 +24,17 @@ services:
       AUTH_MODE: ${AUTH_MODE:-static}
       STATIC_TOKENS: ${STATIC_TOKENS}
       DOMAIN: ${DOMAIN:-conformer.local}
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio-admin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio-secret}
-      MINIO_USE_SSL: "false"
-      MINIO_BUCKET: modules
+      S3_ENDPOINT: versitygw:7070
+      S3_ACCESS_KEY: ${S3_ROOT_USER:-conformer}
+      S3_SECRET_KEY: ${S3_ROOT_PASSWORD:-conformer-secret}
+      S3_USE_SSL: "false"
+      S3_BUCKET: modules
       # Presigned download URLs must be reachable by the Terraform consumer on
-      # the host (not the internal minio:9000). minio publishes 9000 below, so
-      # presign against localhost:9000. The S3 signature binds the host, so this
-      # must match the host the consumer actually connects to.
-      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
-      MINIO_PUBLIC_USE_SSL: ${MINIO_PUBLIC_USE_SSL:-false}
+      # the host (not the internal versitygw:7070). versitygw publishes 7070
+      # below, so presign against localhost:7070. The S3 signature binds the
+      # host, so this must match the host the consumer actually connects to.
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-localhost:7070}
+      S3_PUBLIC_USE_SSL: ${S3_PUBLIC_USE_SSL:-false}
       LISTEN_ADDR: ":8080"
       # Dynamic on-demand patching: cache miss → fetch upstream + patch + cache.
       DYNAMIC_BUILD: ${DYNAMIC_BUILD:-true}
@@ -43,33 +43,31 @@ services:
       # Empty = allow any.
       ALLOWED_MODULES: ${ALLOWED_MODULES:-}
       GITLEAKS_STRICT: ${GITLEAKS_STRICT:-false}
-      # keycloak mode only (ignored when AUTH_MODE=static):
+      # external OIDC only (ignored when AUTH_MODE=static):
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}
       KEYCLOAK_JWKS_URL: ${KEYCLOAK_JWKS_URL:-}
     depends_on:
-      minio:
-        condition: service_healthy
+      - versitygw
     restart: unless-stopped
 
-  minio:
-    image: minio/minio:RELEASE.2024-07-31T05-46-26Z
-    command: server /data --console-address ":9001"
+  # S3 storage — versitygw (Versity S3 Gateway), Apache-2.0. POSIX backend:
+  # buckets map to directories under /data. Replaces MinIO (AGPL) — the project
+  # ships no AGPL binaries. registry-api creates the `modules` bucket on startup
+  # (with retry), so no init step is needed.
+  versitygw:
+    image: versity/versitygw:latest
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-secret}
+      VGW_BACKEND: posix
+      VGW_BACKEND_ARGS: /data
+      VGW_PORT: ":7070"
+      VGW_REGION: us-east-1
+      ROOT_ACCESS_KEY: ${S3_ROOT_USER:-conformer}
+      ROOT_SECRET_KEY: ${S3_ROOT_PASSWORD:-conformer-secret}
     volumes:
-      - minio-data:/data
+      - vgw-data:/data
     ports:
-      - "9000:9000"   # S3 API — published so presigned download URLs resolve from the host
-      - "9001:9001"   # console (optional)
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      - "7070:7070"   # S3 API — published so presigned download URLs resolve from the host
     restart: unless-stopped
-
-  # (bucket is created by registry-api on startup via the minio-go SDK)
 
   caddy:
     image: caddy:2.8-alpine
@@ -95,10 +93,10 @@ services:
       context: ..
       dockerfile: registry-api/Dockerfile
     environment:
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio-admin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio-secret}
-      MINIO_BUCKET: modules
+      S3_ENDPOINT: versitygw:7070
+      S3_ACCESS_KEY: ${S3_ROOT_USER:-conformer}
+      S3_SECRET_KEY: ${S3_ROOT_PASSWORD:-conformer-secret}
+      S3_BUCKET: modules
       UPSTREAM_REGISTRY: ${UPSTREAM_REGISTRY:-registry.terraform.io}
     volumes:
       - ..:/repo:ro
@@ -111,7 +109,7 @@ services:
   # at it. This stack ships static-token auth only (the simple default).
 
 volumes:
-  minio-data:
+  vgw-data:
   caddy-data:
   caddy-config:
   build-tmp:

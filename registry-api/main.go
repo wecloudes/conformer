@@ -20,24 +20,24 @@ import (
 )
 
 type Config struct {
-	MinioEndpoint  string
-	MinioAccessKey string
-	MinioSecretKey string
-	MinioUseSSL    bool
-	MinioBucket    string
+	S3Endpoint  string
+	S3AccessKey string
+	S3SecretKey string
+	S3UseSSL    bool
+	S3Bucket    string
 
-	// MinioPublicEndpoint is the endpoint used to generate PRESIGNED download
+	// S3PublicEndpoint is the endpoint used to generate PRESIGNED download
 	// URLs — it must be reachable by the Terraform consumer, not just by the
 	// API. The S3 signature binds the host, so the URL cannot be rewritten after
-	// signing. Empty → fall back to MinioEndpoint (works when API and consumer
+	// signing. Empty → fall back to S3Endpoint (works when API and consumer
 	// share a network, e.g. all-in-cluster).
-	MinioPublicEndpoint string
-	MinioPublicUseSSL   bool
-	// MinioRegion is set explicitly so the presign client does NOT do a
+	S3PublicEndpoint string
+	S3PublicUseSSL   bool
+	// S3Region is set explicitly so the presign client does NOT do a
 	// bucket-location lookup (GET /<bucket>/?location=). That call would hit the
 	// public endpoint, which is unreachable from inside the container (it points
-	// at the host). MinIO's default region is us-east-1.
-	MinioRegion    string
+	// at the host). versitygw's default region is us-east-1.
+	S3Region    string
 	KeycloakIssuer string
 	KeycloakJWKS   string
 	ListenAddr     string
@@ -68,7 +68,7 @@ type Config struct {
 
 type Server struct {
 	config        Config
-	minioClient   *minio.Client
+	s3Client   *minio.Client
 	presignClient *minio.Client // generates host-reachable presigned URLs
 	jwks          *keyfunc.JWKS
 	builds        sync.Map // objectKey -> *sync.Mutex, dedupes concurrent builds
@@ -103,15 +103,15 @@ type ModuleVersion struct {
 
 func main() {
 	cfg := Config{
-		MinioEndpoint:  envOrDefault("MINIO_ENDPOINT", "minio:9000"),
-		MinioAccessKey: envOrDefault("MINIO_ACCESS_KEY", "minio"),
-		MinioSecretKey: envOrDefault("MINIO_SECRET_KEY", "minio123"),
-		MinioUseSSL:    envOrDefault("MINIO_USE_SSL", "false") == "true",
-		MinioBucket:    envOrDefault("MINIO_BUCKET", "modules"),
+		S3Endpoint:  envOrDefault("S3_ENDPOINT", "versitygw:7070"),
+		S3AccessKey: envOrDefault("S3_ACCESS_KEY", "conformer"),
+		S3SecretKey: envOrDefault("S3_SECRET_KEY", "conformer-secret"),
+		S3UseSSL:    envOrDefault("S3_USE_SSL", "false") == "true",
+		S3Bucket:    envOrDefault("S3_BUCKET", "modules"),
 
-		MinioPublicEndpoint: os.Getenv("MINIO_PUBLIC_ENDPOINT"),
-		MinioPublicUseSSL:   envOrDefault("MINIO_PUBLIC_USE_SSL", "false") == "true",
-		MinioRegion:         envOrDefault("MINIO_REGION", "us-east-1"),
+		S3PublicEndpoint: os.Getenv("S3_PUBLIC_ENDPOINT"),
+		S3PublicUseSSL:   envOrDefault("S3_PUBLIC_USE_SSL", "false") == "true",
+		S3Region:         envOrDefault("S3_REGION", "us-east-1"),
 		KeycloakIssuer:      envOrDefault("KEYCLOAK_ISSUER", "https://auth.conformer.local/realms/compliance"),
 		KeycloakJWKS:        envOrDefault("KEYCLOAK_JWKS_URL", "https://auth.conformer.local/realms/compliance/protocol/openid-connect/certs"),
 		ListenAddr:          envOrDefault("LISTEN_ADDR", ":8080"),
@@ -130,13 +130,13 @@ func main() {
 		log.Printf("Dynamic build ENABLED — cache misses fetch from %s and patch on demand", cfg.UpstreamRegistry)
 	}
 
-	// Initialize MinIO client
-	minioClient, err := minio.New(cfg.MinioEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
-		Secure: cfg.MinioUseSSL,
+	// Initialize S3 client (versitygw)
+	s3Client, err := minio.New(cfg.S3Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.S3AccessKey, cfg.S3SecretKey, ""),
+		Secure: cfg.S3UseSSL,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create MinIO client: %v", err)
+		log.Fatalf("Failed to create S3 client: %v", err)
 	}
 
 	// `registry-api upload <zipPath> <objectKey>` — lets the build scripts push
@@ -145,16 +145,25 @@ func main() {
 		if len(os.Args) != 4 {
 			log.Fatalf("usage: registry-api upload <zipPath> <objectKey>")
 		}
-		if uerr := uploadObject(context.Background(), minioClient, cfg.MinioBucket, os.Args[3], os.Args[2]); uerr != nil {
+		if uerr := uploadObject(context.Background(), s3Client, cfg.S3Bucket, os.Args[3], os.Args[2]); uerr != nil {
 			log.Fatalf("upload failed: %v", uerr)
 		}
 		log.Printf("uploaded %s", os.Args[3])
 		return
 	}
 
-	// Ensure the bucket exists (replaces the mc-based minio-init step).
-	if berr := ensureBucket(context.Background(), minioClient, cfg.MinioBucket); berr != nil {
-		log.Printf("Warning: ensure bucket %q: %v", cfg.MinioBucket, berr)
+	// Ensure the bucket exists. Retry so the API tolerates the S3 store
+	// (versitygw) still coming up — avoids depending on a container healthcheck.
+	for attempt := 1; ; attempt++ {
+		if berr := ensureBucket(context.Background(), s3Client, cfg.S3Bucket); berr == nil {
+			break
+		} else if attempt >= 30 {
+			log.Printf("Warning: ensure bucket %q failed after %d attempts: %v", cfg.S3Bucket, attempt, berr)
+			break
+		} else {
+			log.Printf("waiting for S3 store (%s), bucket %q not ready (attempt %d): %v", cfg.S3Endpoint, cfg.S3Bucket, attempt, berr)
+			time.Sleep(2 * time.Second)
+		}
 	}
 
 	// Initialize JWKS for token validation — only needed in keycloak mode.
@@ -174,27 +183,27 @@ func main() {
 	}
 
 	// presignClient generates download URLs the consumer can actually resolve.
-	// When MINIO_PUBLIC_ENDPOINT is set (and differs), build a second client
+	// When S3_PUBLIC_ENDPOINT is set (and differs), build a second client
 	// against it. Region is pinned so presigning never makes a (doomed) bucket-
 	// location call to that unreachable endpoint. Otherwise reuse the main client.
-	presignClient := minioClient
-	if cfg.MinioPublicEndpoint != "" &&
-		(cfg.MinioPublicEndpoint != cfg.MinioEndpoint || cfg.MinioPublicUseSSL != cfg.MinioUseSSL) {
-		pc, perr := minio.New(cfg.MinioPublicEndpoint, &minio.Options{
-			Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
-			Secure: cfg.MinioPublicUseSSL,
-			Region: cfg.MinioRegion, // skip the bucket-location lookup
+	presignClient := s3Client
+	if cfg.S3PublicEndpoint != "" &&
+		(cfg.S3PublicEndpoint != cfg.S3Endpoint || cfg.S3PublicUseSSL != cfg.S3UseSSL) {
+		pc, perr := minio.New(cfg.S3PublicEndpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(cfg.S3AccessKey, cfg.S3SecretKey, ""),
+			Secure: cfg.S3PublicUseSSL,
+			Region: cfg.S3Region, // skip the bucket-location lookup
 		})
 		if perr != nil {
-			log.Fatalf("Failed to create MinIO presign client: %v", perr)
+			log.Fatalf("Failed to create S3 presign client: %v", perr)
 		}
 		presignClient = pc
-		log.Printf("Presigned URLs use public endpoint %s (ssl=%t)", cfg.MinioPublicEndpoint, cfg.MinioPublicUseSSL)
+		log.Printf("Presigned URLs use public endpoint %s (ssl=%t)", cfg.S3PublicEndpoint, cfg.S3PublicUseSSL)
 	}
 
 	srv := &Server{
 		config:        cfg,
-		minioClient:   minioClient,
+		s3Client:   s3Client,
 		presignClient: presignClient,
 		jwks:          jwks,
 	}
@@ -276,13 +285,13 @@ func (s *Server) handleModules(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleListVersions lists available versions for a module+framework from MinIO
+// handleListVersions lists available versions for a module+framework from the S3 store
 func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request, namespace, name, provider, framework string) {
 	ctx := r.Context()
 
 	// In dynamic mode the upstream registry is authoritative for which versions
 	// exist — proxy its list so any version can be requested (and built on the
-	// subsequent download). Fall back to the MinIO listing if upstream fails.
+	// subsequent download). Fall back to the S3 listing if upstream fails.
 	if s.config.DynamicBuild {
 		if body, err := fetchUpstreamVersions(ctx, s.config.UpstreamRegistry, namespace, name, provider); err == nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -296,7 +305,7 @@ func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request, name
 	prefix := fmt.Sprintf("%s/%s/%s/%s/", namespace, name, provider, framework)
 
 	var versions []ModuleVersion
-	for obj := range s.minioClient.ListObjects(ctx, s.config.MinioBucket, minio.ListObjectsOptions{
+	for obj := range s.s3Client.ListObjects(ctx, s.config.S3Bucket, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: false,
 	}) {
@@ -325,12 +334,12 @@ func (s *Server) handleListVersions(w http.ResponseWriter, r *http.Request, name
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleDownload generates a presigned MinIO URL and returns it via x-terraform-get
+// handleDownload generates a presigned S3 URL and returns it via x-terraform-get
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, namespace, name, provider, version, framework string) {
 	objectKey := fmt.Sprintf("%s/%s/%s/%s/%s.zip", namespace, name, provider, framework, version)
 
 	// Check object exists
-	_, err := s.minioClient.StatObject(r.Context(), s.config.MinioBucket, objectKey, minio.StatObjectOptions{})
+	_, err := s.s3Client.StatObject(r.Context(), s.config.S3Bucket, objectKey, minio.StatObjectOptions{})
 	if err != nil {
 		errResp := minio.ToErrorResponse(err)
 		if errResp.Code != "NoSuchKey" {
@@ -350,7 +359,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, namespac
 			http.Error(w, fmt.Sprintf("Dynamic build failed: %v", berr), http.StatusBadGateway)
 			return
 		}
-		if _, serr := s.minioClient.StatObject(r.Context(), s.config.MinioBucket, objectKey, minio.StatObjectOptions{}); serr != nil {
+		if _, serr := s.s3Client.StatObject(r.Context(), s.config.S3Bucket, objectKey, minio.StatObjectOptions{}); serr != nil {
 			log.Printf("object %s missing after build: %v", objectKey, serr)
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
@@ -359,7 +368,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, namespac
 
 	// Generate presigned URL (10 min expiry)
 	presignedURL, err := s.presignClient.PresignedGetObject(context.Background(),
-		s.config.MinioBucket, objectKey, 10*time.Minute, nil)
+		s.config.S3Bucket, objectKey, 10*time.Minute, nil)
 	if err != nil {
 		log.Printf("Error generating presigned URL: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
@@ -412,7 +421,7 @@ func (s *Server) handleDirectModule(w http.ResponseWriter, r *http.Request) {
 	objectKey := fmt.Sprintf("%s/%s/%s/%s/%s.zip", namespace, name, provider, profile, version)
 
 	// Ad-hoc sets are never pre-built: build on miss regardless of DynamicBuild.
-	if _, err := s.minioClient.StatObject(r.Context(), s.config.MinioBucket, objectKey, minio.StatObjectOptions{}); err != nil {
+	if _, err := s.s3Client.StatObject(r.Context(), s.config.S3Bucket, objectKey, minio.StatObjectOptions{}); err != nil {
 		errResp := minio.ToErrorResponse(err)
 		if errResp.Code != "NoSuchKey" {
 			log.Printf("Error checking object %s: %v", objectKey, err)
@@ -426,7 +435,7 @@ func (s *Server) handleDirectModule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	presignedURL, err := s.presignClient.PresignedGetObject(context.Background(),
-		s.config.MinioBucket, objectKey, 10*time.Minute, nil)
+		s.config.S3Bucket, objectKey, 10*time.Minute, nil)
 	if err != nil {
 		log.Printf("Error generating presigned URL: %v", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)

@@ -54,8 +54,8 @@ The whole product is the four Compose services in [`compose/`](compose/):
 | Service | Tool | Purpose |
 |---|---|---|
 | `registry-api` | Custom Go service (bundled toolkit) | Terraform Module Registry Protocol v1 + `/m/` direct endpoint; builds modules on demand |
-| `minio` | MinIO | S3-compatible module zip storage |
-| `builder` | one-shot `./build.sh` (registry-api image) | Pre-build / warm the cache, upload to MinIO |
+| `versitygw` | Versity S3 Gateway (Apache-2.0) | S3 storage for module zips (POSIX backend) |
+| `builder` | one-shot `./build.sh` (registry-api image) | Pre-build / warm the cache, upload to S3 |
 | `caddy` | Caddy | Wildcard subdomain routing + automatic local TLS |
 
 The patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) is bundled **inside** the
@@ -169,8 +169,8 @@ cp .env.example .env          # set STATIC_TOKENS to your own secret
 docker compose up -d --build
 ```
 
-This starts `registry-api`, `minio` (creates the `modules` bucket on first
-start), and `caddy`. With `DYNAMIC_BUILD=true` (the default) any upstream module
+This starts `registry-api`, `versitygw` (the registry-api creates the `modules`
+bucket on first start), and `caddy`. With `DYNAMIC_BUILD=true` (the default) any upstream module
 is fetched, patched, and cached on first request — no pre-build needed. To warm
 the cache or pre-build explicitly:
 
@@ -299,7 +299,7 @@ and caches any requested module on first use.
 conformer/
 ├── docs/                           # Strategy + technique + consuming guides
 ├── compose/                        # Docker Compose stack — the whole product
-│   ├── docker-compose.yml          # registry-api + minio + caddy + builder
+│   ├── docker-compose.yml          # registry-api + versitygw + caddy + builder
 │   ├── Caddyfile                   # wildcard proxy + automatic local TLS
 │   ├── .env.example                # STATIC_TOKENS, DYNAMIC_BUILD, …
 │   ├── build.sh                    # one-shot pre-build (framework module version)
