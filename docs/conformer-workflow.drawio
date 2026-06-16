@@ -1,0 +1,85 @@
+<mxfile host="conformer" type="device">
+  <diagram name="Conformer workflow" id="conformer-workflow">
+    <mxGraphModel dx="900" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1000" pageHeight="1120" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="consumer" value="Consumer (terraform / terragrunt)&#10;A) cis.conformer.local/ns/name/provider + version   [GATED]&#10;B) https://conformer.local/m/ns/name/provider?version=x&amp;transformation=tags,destroy   [OPEN]&#10;C) ...&amp;framework=cis&amp;transformation=tags,destroy   [OPEN, framework + extra units]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="700" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="caddy" value="Caddy&#10;wildcard *.conformer.local + apex&#10;reverse proxy + local/real TLS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="300" y="170" width="220" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="route" value="Registry API (Go)&#10;route by Host header / path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="300" y="270" width="220" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fwauth" value="Framework path  [GATED]&#10;extract framework from Host&#10;validate token + entitlement" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="40" y="360" width="230" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="direct" value="Direct /m/ path  [OPEN]&#10;parse query, sanitize+sort units;&#10;optional ?framework= composes&#10;its bundle + ad-hoc units (no token)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="300" y="360" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="catalog" value="GET /v1/catalog  [OPEN]&#10;frameworks + units +&#10;cached modules (discovery)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="580" y="360" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="key" value="resolve object key&#10;ns/name/provider/PROFILE/version.zip&#10;PROFILE = framework | set.units | framework.plus.units" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="170" y="470" width="370" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cache" value="zip in versitygw?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="280" y="570" width="170" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="build" value="Dynamic build (cache miss)&#10;build-dynamic.sh: tofu get from upstream&#10;patch-module.sh: expand framework manifest + append units&#10;5-layer pipeline (sanitize, strip, mapotf, toggles, fmt)&#10;interface check (drop-in guard) -&gt; upload zip" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="690" width="430" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="upstream" value="upstream Terraform registry" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="560" y="700" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rules" value="transformations/ + frameworks/&#10;mapotf units + manifests" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="560" y="780" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="presign" value="presigned GET URL (sigv4)&#10;X-Terraform-Get, 10 min&#10;public endpoint" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="600" y="570" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="vgw" value="versitygw  (S3 storage, Apache-2.0)&#10;POSIX backend, buckets = dirs" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="300" y="880" width="290" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dl" value="terraform downloads zip direct from versitygw&#10;-&gt; unpack -&gt; plan" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="640" y="880" width="300" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="consumer" target="caddy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="caddy" target="route"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="cis. host" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="route" target="fwauth"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="/m/" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="route" target="direct"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="apex" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="route" target="catalog"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="fwauth" target="key"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="direct" target="key"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="key" target="cache"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" value="HIT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="cache" target="presign"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="MISS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="cache" target="build"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="build" target="upstream"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="build" target="rules"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" value="upload" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="build" target="vgw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="build" target="presign"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="presign" target="vgw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" value="X-Terraform-Get" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="presign" target="dl"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e17" value="fetch .zip" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="dl" target="vgw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="catalog" target="vgw"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
