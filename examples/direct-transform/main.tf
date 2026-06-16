@@ -25,6 +25,10 @@ module "automation" {
   # go-getter http source: version + transformation set in the query string.
   source = "https://conformer.local/m/Azure/avm-res-automation-automationaccount/azurerm?version=0.2.0&transformation=tags,destroy"
 
+  # Or compose a whole framework bundle PLUS extra ad-hoc units (still open):
+  #   source = "https://conformer.local/m/Azure/avm-res-automation-automationaccount/azurerm?version=0.2.0&framework=cis&transformation=tags,destroy"
+  # framework= expands its unit bundle; the transformation= units apply on top.
+
   # Minimal inputs to satisfy the module's required arguments. A full `plan`
   # would also need a configured azurerm provider + Azure creds; this example
   # only proves the registry serves the patched module (init/get resolves it).

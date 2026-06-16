@@ -203,9 +203,20 @@ Notes:
   is **no separate `version =` argument** — `?version=` carries it.
 - `?transformation=tags,destroy` selects the transformation **units** directly;
   the server builds only those, in that order. Swap in any unit name(s).
+- `?framework=cis` selects a whole framework bundle, and you can combine the two
+  — `?framework=cis&transformation=tags,destroy` expands the framework's units
+  and applies the ad-hoc units on top. Pass either or both (at least one).
+
+  ```hcl
+  source = "https://conformer.local/m/Azure/avm-res-automation-automationaccount/azurerm?version=0.2.0&framework=cis&transformation=tags,destroy"
+  ```
+
 - This path is **open** — no Keycloak login, no `credentials.tfrc.json`, no
-  registry token. Use it for quick experiments; use the gated framework
-  subdomains (Model A) when you need entitlement enforcement.
+  registry token, even with `?framework=`. Composing more units can only harden,
+  never weaken, so there is nothing to gate; the entitlement check (which tenant
+  may use which framework) lives only on the gated framework subdomains (Model A).
+  Cache keys: `set.<units>` (units only), `<framework>` (framework only — shared
+  with the subdomain path), `<framework>.plus.<units>` (combined).
 
 ---
 
