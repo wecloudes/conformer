@@ -105,6 +105,16 @@ be entitled to that framework in `STATIC_TOKENS`. The direct `/m/` mode (section
   the JWT against its JWKS and reads framework entitlement from the token. This
   stack does not bundle an IdP.
 
+## Discover what's available
+
+`GET /v1/catalog` (open, no token) lists the frameworks (with their unit
+bundles + descriptions), all transformation units, and the modules already
+hardened + cached:
+
+```bash
+curl -sk https://conformer.local/v1/catalog | jq
+```
+
 ## Quick API check (no Terraform)
 
 ```bash
