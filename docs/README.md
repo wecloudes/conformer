@@ -53,7 +53,7 @@ listing the units it enables, not a folder of rules.
 ## Deploying the registry (Model A)
 
 Deploy with [`compose/`](../compose/) — a single-host Docker Compose stack
-(registry-api + MinIO + Caddy + a one-shot builder) that serves the Registry
+(registry-api + versitygw + Caddy + a one-shot builder) that serves the Registry
 Protocol and runs the hardening pipeline. Auth is static-token by default, with
 optional external OIDC.
 

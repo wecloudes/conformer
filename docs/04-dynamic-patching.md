@@ -40,7 +40,7 @@ terraform init
    │  GET …/{version}/download
    ▼
 API handleDownload  (framework subdomain)   handleDirectModule  (/m/ go-getter)
-   ├─ object in MinIO?  ── yes ─► presigned URL (X-Terraform-Get)
+   ├─ object in versitygw?  ── yes ─► presigned URL (X-Terraform-Get)
    └─ no  ─► ensureBuilt()
               ├─ lock per object key (dedupe concurrent requests)
               ├─ scripts/build-dynamic.sh ns name provider version framework
@@ -56,7 +56,7 @@ The framework subdomain path keys the cache by
 `{ns}/{name}/{provider}/{framework}/{version}.zip`; the direct path keys it by
 `{ns}/{name}/{provider}/set.<units>/{version}.zip`, where `<units>` is the
 **sorted, deduped** transformation list (so `tags,destroy` and `destroy,tags`
-share one cache entry). Subsequent requests for the same key hit the MinIO cache
+share one cache entry). Subsequent requests for the same key hit the versitygw cache
 directly. Implementation: `registry-api/build.go` (`ensureBuilt`,
 `fetchUpstreamVersions`), `registry-api/main.go` (`handleDownload`,
 `handleDirectModule`), and `scripts/build-dynamic.sh`.
