@@ -1,0 +1,117 @@
+# Docker Compose — the single-host stack that runs the whole registry.
+#
+#   registry-api  Go service (Terraform Registry Protocol + /m/ direct endpoint),
+#                 bundled patch toolkit; ensures the MinIO bucket on startup
+#   minio         S3-compatible storage for hardened module zips
+#   caddy         wildcard reverse proxy + automatic local TLS (subdomains + apex)
+#   builder       one-shot pre-builder (registry-api image) — `--profile build`
+#
+# Quick start:
+#   cp .env.example .env          # set a token
+#   docker compose up -d --build
+#   ./build.sh cis_v600 s3-bucket 5.11.0
+#   # add conformer.local + *.conformer.local -> 127.0.0.1 to /etc/hosts, trust caddy CA
+
+name: conformer
+
+services:
+  registry-api:
+    image: conformer-registry-api:latest
+    build:
+      context: ..
+      dockerfile: registry-api/Dockerfile
+    environment:
+      AUTH_MODE: ${AUTH_MODE:-static}
+      STATIC_TOKENS: ${STATIC_TOKENS}
+      DOMAIN: ${DOMAIN:-conformer.local}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio-secret}
+      MINIO_USE_SSL: "false"
+      MINIO_BUCKET: modules
+      # Presigned download URLs must be reachable by the Terraform consumer on
+      # the host (not the internal minio:9000). minio publishes 9000 below, so
+      # presign against localhost:9000. The S3 signature binds the host, so this
+      # must match the host the consumer actually connects to.
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      MINIO_PUBLIC_USE_SSL: ${MINIO_PUBLIC_USE_SSL:-false}
+      LISTEN_ADDR: ":8080"
+      # Dynamic on-demand patching: cache miss → fetch upstream + patch + cache.
+      DYNAMIC_BUILD: ${DYNAMIC_BUILD:-true}
+      UPSTREAM_REGISTRY: ${UPSTREAM_REGISTRY:-registry.terraform.io}
+      # Restrict which upstream modules may be dynamically built (globs, CSV).
+      # Empty = allow any.
+      ALLOWED_MODULES: ${ALLOWED_MODULES:-}
+      GITLEAKS_STRICT: ${GITLEAKS_STRICT:-false}
+      # keycloak mode only (ignored when AUTH_MODE=static):
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}
+      KEYCLOAK_JWKS_URL: ${KEYCLOAK_JWKS_URL:-}
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2024-07-31T05-46-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio-secret}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"   # S3 API — published so presigned download URLs resolve from the host
+      - "9001:9001"   # console (optional)
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # (bucket is created by registry-api on startup via the minio-go SDK)
+
+  caddy:
+    image: caddy:2.8-alpine
+    depends_on:
+      - registry-api
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+  # One-shot pre-builder — replaces Tekton. Reuses the registry-api image
+  # (bundles tofu/mapotf/hcledit/gitleaks + the registry-api binary for uploads).
+  # Run via ./build.sh (profile keeps it out of `up`). Mounts the repo so it
+  # sees the current transformations/, frameworks/ and scripts/.
+  builder:
+    profiles: ["build"]
+    image: conformer-registry-api:latest
+    build:
+      context: ..
+      dockerfile: registry-api/Dockerfile
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio-secret}
+      MINIO_BUCKET: modules
+      UPSTREAM_REGISTRY: ${UPSTREAM_REGISTRY:-registry.terraform.io}
+    volumes:
+      - ..:/repo:ro
+      - build-tmp:/tmp/build
+    working_dir: /repo
+    entrypoint: ["/repo/compose/build-module.sh"]
+
+  # NOTE: the registry API also supports OIDC auth (AUTH_MODE=keycloak) against an
+  # EXTERNAL Keycloak you run yourself — point KEYCLOAK_ISSUER / KEYCLOAK_JWKS_URL
+  # at it. This stack ships static-token auth only (the simple default).
+
+volumes:
+  minio-data:
+  caddy-data:
+  caddy-config:
+  build-tmp:
