@@ -37,7 +37,7 @@ type Config struct {
 	// bucket-location lookup (GET /<bucket>/?location=). That call would hit the
 	// public endpoint, which is unreachable from inside the container (it points
 	// at the host). versitygw's default region is us-east-1.
-	S3Region    string
+	S3Region       string
 	KeycloakIssuer string
 	KeycloakJWKS   string
 	ListenAddr     string
@@ -68,7 +68,7 @@ type Config struct {
 
 type Server struct {
 	config        Config
-	s3Client   *minio.Client
+	s3Client      *minio.Client
 	presignClient *minio.Client // generates host-reachable presigned URLs
 	jwks          *keyfunc.JWKS
 	builds        sync.Map // objectKey -> *sync.Mutex, dedupes concurrent builds
@@ -112,12 +112,12 @@ func main() {
 		S3PublicEndpoint: os.Getenv("S3_PUBLIC_ENDPOINT"),
 		S3PublicUseSSL:   envOrDefault("S3_PUBLIC_USE_SSL", "false") == "true",
 		S3Region:         envOrDefault("S3_REGION", "us-east-1"),
-		KeycloakIssuer:      envOrDefault("KEYCLOAK_ISSUER", "https://auth.conformer.local/realms/compliance"),
-		KeycloakJWKS:        envOrDefault("KEYCLOAK_JWKS_URL", "https://auth.conformer.local/realms/compliance/protocol/openid-connect/certs"),
-		ListenAddr:          envOrDefault("LISTEN_ADDR", ":8080"),
-		Domain:              envOrDefault("DOMAIN", "conformer.local"),
-		AuthMode:            envOrDefault("AUTH_MODE", "keycloak"),
-		StaticTokens:        parseStaticTokens(os.Getenv("STATIC_TOKENS")),
+		KeycloakIssuer:   envOrDefault("KEYCLOAK_ISSUER", "https://auth.conformer.local/realms/compliance"),
+		KeycloakJWKS:     envOrDefault("KEYCLOAK_JWKS_URL", "https://auth.conformer.local/realms/compliance/protocol/openid-connect/certs"),
+		ListenAddr:       envOrDefault("LISTEN_ADDR", ":8080"),
+		Domain:           envOrDefault("DOMAIN", "conformer.local"),
+		AuthMode:         envOrDefault("AUTH_MODE", "keycloak"),
+		StaticTokens:     parseStaticTokens(os.Getenv("STATIC_TOKENS")),
 
 		DynamicBuild:     envOrDefault("DYNAMIC_BUILD", "false") == "true",
 		UpstreamRegistry: envOrDefault("UPSTREAM_REGISTRY", "registry.terraform.io"),
@@ -203,7 +203,7 @@ func main() {
 
 	srv := &Server{
 		config:        cfg,
-		s3Client:   s3Client,
+		s3Client:      s3Client,
 		presignClient: presignClient,
 		jwks:          jwks,
 	}
@@ -380,12 +380,16 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request, namespac
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDirectModule serves the go-getter "direct" mode (ADR-009): a
-// framework-less, ad-hoc transformation set, OPEN (no token, no entitlement).
+// handleDirectModule serves the go-getter "direct" mode (ADR-009): an ad-hoc
+// transformation set and/or a framework bundle, OPEN (no token, no entitlement).
 // The consumer writes a go-getter http source, not a registry source, so the
-// transformation set rides a real query string:
+// selection rides a real query string. Either or both of framework/transformation:
 //
 //	source = "https://<domain>/m/<ns>/<name>/<provider>?version=X&transformation=tags,destroy"
+//	source = "https://<domain>/m/<ns>/<name>/<provider>?version=X&framework=cis&transformation=tags,destroy"
+//
+// A framework expands to its unit bundle; the ad-hoc units are applied on top.
+// Open by design — composing more units only hardens, never weakens (ADR-012).
 //
 // We build (always, ad-hoc sets are never pre-baked), cache under a canonical
 // profile key, and return X-Terraform-Get pointing at the presigned .zip so
@@ -411,16 +415,45 @@ func (s *Server) handleDirectModule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	transforms := canonicalTransforms(r.URL.Query().Get("transformation"))
-	if len(transforms) == 0 {
-		http.Error(w, "missing/invalid required query param: transformation (comma-separated, [A-Za-z0-9_-])", http.StatusBadRequest)
+
+	// Optional framework: compose its unit bundle with the ad-hoc transformations
+	// (the build engine appends TRANSFORMATIONS after the framework's units). This
+	// stays OPEN — no token, no entitlement — because composing more units can
+	// only harden, never weaken. Entitlement lives only on the registry path.
+	framework := ""
+	if fwRaw := r.URL.Query().Get("framework"); fwRaw != "" {
+		if !isSafeName(fwRaw) {
+			http.Error(w, "invalid framework query param (expected [A-Za-z0-9_-])", http.StatusBadRequest)
+			return
+		}
+		framework = mapFramework(fwRaw)
+	}
+
+	if framework == "" && len(transforms) == 0 {
+		http.Error(w, "need at least one of: framework, transformation (comma-separated, [A-Za-z0-9_-])", http.StatusBadRequest)
 		return
 	}
 
-	// Canonical (sorted, deduped) cache key so tags,destroy == destroy,tags.
-	profile := "set." + strings.Join(transforms, "-")
+	// Canonical cache key. framework-only reuses the registry path's cache entry
+	// ({framework}); framework+units and units-only get distinct, order-stable
+	// keys (tags,destroy == destroy,tags).
+	var profile string
+	switch {
+	case framework != "" && len(transforms) > 0:
+		profile = framework + ".plus." + strings.Join(transforms, "-")
+	case framework != "":
+		profile = framework
+	default:
+		profile = "set." + strings.Join(transforms, "-")
+	}
 	objectKey := fmt.Sprintf("%s/%s/%s/%s/%s.zip", namespace, name, provider, profile, version)
 
-	// Ad-hoc sets are never pre-built: build on miss regardless of DynamicBuild.
+	buildFramework := framework
+	if buildFramework == "" {
+		buildFramework = "none"
+	}
+
+	// Build on miss (these profiles are never pre-built).
 	if _, err := s.s3Client.StatObject(r.Context(), s.config.S3Bucket, objectKey, minio.StatObjectOptions{}); err != nil {
 		errResp := minio.ToErrorResponse(err)
 		if errResp.Code != "NoSuchKey" {
@@ -428,7 +461,7 @@ func (s *Server) handleDirectModule(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
 		}
-		if berr := s.ensureBuilt(r.Context(), namespace, name, provider, version, "none", strings.Join(transforms, ","), objectKey); berr != nil {
+		if berr := s.ensureBuilt(r.Context(), namespace, name, provider, version, buildFramework, strings.Join(transforms, ","), objectKey); berr != nil {
 			http.Error(w, fmt.Sprintf("Build failed: %v", berr), http.StatusBadGateway)
 			return
 		}
@@ -498,20 +531,27 @@ func (s *Server) extractFramework(host string) string {
 	if framework == "" || strings.Contains(framework, ".") {
 		return ""
 	}
+	return mapFramework(framework)
+}
 
-	// Map known framework subdomains to storage paths
-	frameworkMap := map[string]string{
-		"cis":      "cis_v600",
-		"iso27001": "iso27001",
-		"soc2":     "soc2",
-		"hipaa":    "hipaa",
-		"pci":      "pci_dss",
-		"nist":     "nist_800_53",
-	}
-	if mapped, ok := frameworkMap[framework]; ok {
+// frameworkMap maps friendly framework names (subdomains / ?framework=) to the
+// storage-path / manifest name (frameworks/<path>.hcl).
+var frameworkMap = map[string]string{
+	"cis":      "cis_v600",
+	"iso27001": "iso27001",
+	"soc2":     "soc2",
+	"hipaa":    "hipaa",
+	"pci":      "pci_dss",
+	"nist":     "nist_800_53",
+}
+
+// mapFramework resolves a friendly framework name to its storage path; unknown
+// names pass through verbatim (the build fails later if no manifest exists).
+func mapFramework(name string) string {
+	if mapped, ok := frameworkMap[name]; ok {
 		return mapped
 	}
-	return framework
+	return name
 }
 
 // validateToken validates the Bearer token. In keycloak mode it verifies the

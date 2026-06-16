@@ -152,12 +152,27 @@ module "automation" {
 ```
 
 `handleDirectModule` sanitizes and **sorts/dedupes** the `transformation` list,
-builds the module with exactly those units (`TRANSFORMATIONS=tags,destroy`, no
-framework), and caches it under the canonical key
-`{ns}/{name}/{provider}/set.destroy-tags/{version}.zip`. Ad-hoc sets are never
-pre-baked, so this path always builds on a miss regardless of `DYNAMIC_BUILD`;
-it is gated only by `DIRECT_MODE` (on by default). A worked example lives in
-`examples/direct-transform/`.
+builds the module with exactly those units (`TRANSFORMATIONS=tags,destroy`), and
+caches it under a canonical key. It also accepts an optional **`?framework=`**,
+so you can compose a framework bundle with ad-hoc units in one call (open — no
+token, because composing only hardens):
+
+```hcl
+source = "https://conformer.local/m/Azure/avm-res-automation-automationaccount/azurerm?version=0.2.0&framework=cis&transformation=tags,destroy"
+```
+
+The build engine expands the framework manifest and appends the ad-hoc units.
+Cache key (the 4th path segment) by selection:
+
+| Selection | Key segment |
+|---|---|
+| units only | `set.<sorted-units>` (e.g. `set.destroy-tags`) |
+| framework only | `<framework>` (e.g. `cis_v600`) — **shared** with the subdomain path's cache |
+| framework + units | `<framework>.plus.<sorted-units>` (e.g. `cis_v600.plus.destroy-tags`) |
+
+These profiles are never pre-baked, so this path always builds on a miss
+regardless of `DYNAMIC_BUILD`; it is gated only by `DIRECT_MODE` (on by default).
+A worked example lives in `examples/direct-transform/`.
 
 ## Trade-offs
 

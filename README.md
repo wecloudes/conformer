@@ -126,18 +126,25 @@ transformation set is chosen and whether the request is gated.
 
   Subdomains: `cis` / `iso27001` / `soc2`.
 
-- **Direct go-getter mode (ad-hoc, open):** framework-less and ungated — a
-  convenience, not a control. The transformation set rides the query string of a
-  go-getter HTTP source, so there is **no** `version =` argument (the version is
-  a query param). Unit names are sanitized to `[A-Za-z0-9_-]` and are
-  order-independent (canonical cache key):
+- **Direct go-getter mode (ad-hoc, open):** ungated — a convenience, not a
+  control. The selection rides the query string of a go-getter HTTP source, so
+  there is **no** `version =` argument (the version is a query param). Pass a
+  `transformation=` set, a `framework=`, or **both** — a framework expands to its
+  unit bundle and the ad-hoc units are applied on top. Names are sanitized to
+  `[A-Za-z0-9_-]` and order-independent (canonical cache key):
 
   ```hcl
+  # ad-hoc units only
   source = "https://conformer.local/m/<ns>/<name>/<provider>?version=X&transformation=tags,destroy"
+
+  # a framework PLUS extra units (open — composing only hardens, never weakens)
+  source = "https://conformer.local/m/<ns>/<name>/<provider>?version=X&framework=cis&transformation=tags,destroy"
   ```
 
   This is **not** the registry protocol — no `terraform login`, no entitlement.
-  See [`examples/direct-transform/`](examples/direct-transform/).
+  `framework=` here is ungated on purpose: the entitlement gate (which tenant may
+  use which framework) lives only on the registry subdomain path. See
+  [`examples/direct-transform/`](examples/direct-transform/).
 
 These map onto the enforcement spectrum:
 
