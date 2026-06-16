@@ -15,7 +15,7 @@ units drive both models.
 ## Model A — registry (server-gated)
 
 The transform runs **once**, at build time, in the compose builder (or on demand
-via dynamic build). The hardened module is zipped, stored in MinIO, and served
+via dynamic build). The hardened module is zipped, stored in versitygw, and served
 via the Terraform Module Registry Protocol. Consumers use plain `terraform`.
 
 ```
@@ -24,11 +24,11 @@ via the Terraform Module Registry Protocol. Consumers use plain `terraform`.
   │ fetch upstream @ tag          │          │ terraform / terragrunt   │
   │ → patch (layers 1–4)          │   zip    │   source = cis.conformer │
   │ → zip                         ├────────► │   .local/.../s3-bucket   │
-  │ → upload to MinIO             │  MinIO   │                          │
+  │ → upload to S3                │versitygw │                          │
   └──────────────────────────────┘          │ Registry API:            │
-                                             │  • validate Keycloak JWT │
+                                             │  • validate token        │
                                              │  • check framework entitlement
-                                             │  • presigned MinIO URL   │
+                                             │  • presigned S3 URL      │
                                              └──────────────────────────┘
 ```
 
@@ -43,7 +43,7 @@ via the Terraform Module Registry Protocol. Consumers use plain `terraform`.
 
 **Costs**
 
-- A Docker Compose stack — registry-api, MinIO, Caddy (wildcard TLS) — plus
+- A Docker Compose stack — registry-api, versitygw, Caddy (wildcard TLS) — plus
   wildcard DNS. Auth is static tokens by default (optional external OIDC).
 - Hardening is baked at build; a new control means a new build + version.
 

@@ -32,7 +32,7 @@ Conformer ships as a single-host Docker Compose stack:
   └─────┬──────┘
         │
   ┌─────▼───────┐        ┌──────────┐
-  │ Registry    │───────▶│  MinIO   │  S3-compatible zip storage
+  │ Registry    │───────▶│versitygw │  S3 storage (Apache-2.0)
   │ API (Go)    │        └──────────┘
   │ + toolkit   │
   └─────┬───────┘
@@ -67,7 +67,7 @@ The patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) is bundled **inside** the
 2. The Registry API extracts the framework from the `Host` header
 3. Validates the Bearer token (static tokens by default; an external Keycloak JWKS when `AUTH_MODE=keycloak`), checks framework entitlement
 4. Expands the framework manifest to its transformation-unit list, builds (or reuses) the hardened zip
-5. Returns a presigned MinIO URL and Terraform downloads / uses the patched module transparently
+5. Returns a presigned S3 URL and Terraform downloads / uses the patched module transparently
 
 ## Module transformation
 
@@ -143,7 +143,7 @@ These map onto the enforcement spectrum:
 
 - **Model A — registry (the Compose stack):** the transform runs server-side —
   either pre-built by the Compose builder (`./build.sh`) or on demand at first
-  request (dynamic build) — and the hardened zip is stored in MinIO and served
+  request (dynamic build) — and the hardened zip is stored in versitygw and served
   via the Registry Protocol. Consumers use plain `terraform`; enforcement is
   mandatory and server-gated.
 - **Model B — direct (no registry, no fork):** the *same* `rules.mptf.hcl` are
@@ -258,7 +258,7 @@ module "s3_bucket" {
 ### Pre-build a module
 
 The one-shot builder runs the layered pipeline and uploads the hardened zip to
-MinIO (`framework module version`):
+versitygw (`framework module version`):
 
 ```bash
 cd compose
