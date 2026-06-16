@@ -4,6 +4,10 @@ How Conformer hardens Terraform/OpenTofu modules, the strategies for delivering
 that hardening, and how to consume it. Tooling licenses: see
 [LICENSES.md](../LICENSES.md).
 
+> Editable workflow diagram: [`conformer-workflow.drawio`](conformer-workflow.drawio)
+> (request/build flow — both consumption paths, `?framework=` compose, dynamic
+> build, `/v1/catalog`, versitygw). Open with [draw.io](https://draw.io).
+
 Read in order:
 
 1. **[Transformation techniques](01-transformation-techniques.md)** — *how* a
