@@ -24,6 +24,15 @@ for Model A, or an on-demand dynamic build serves it; the consumer machine for
 Model B). Layer 5 runs against a real plan, so it lives on the consumer/CI side
 in both models.
 
+**Drop-in guarantee.** After layers 1–4, the build runs an interface check
+([`scripts/check-interface.sh`](../scripts/check-interface.sh)) that **fails the
+build** if a transformation removes/renames an upstream `variable` or `output`,
+or adds a *required* variable (new variables must carry a `default`). This keeps
+the hardened module a drop-in for the upstream — a consumer swaps only the
+`source`; every input and output it binds to is preserved. Adding optional
+variables, changing defaults, mutating resource bodies, and injecting `check`
+blocks are all allowed (they do not change the caller-facing contract).
+
 The build orchestration is the layered pipeline
 [`scripts/patch-module.sh`](../scripts/patch-module.sh), run by the Docker
 Compose `builder` (`./build.sh`) or the registry-api's in-process dynamic

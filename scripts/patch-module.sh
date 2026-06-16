@@ -177,6 +177,12 @@ variable "conformer_transformations" {
 EOF
 fi
 
+# Interface-preservation guard: the patched module must stay a drop-in for the
+# upstream (same variable/output contract) so consumers swap only the `source`.
+# SRC_DIR is the pristine upstream; OUTPUT_DIR is the patched copy (cwd).
+echo "=== [4.5/6] interface check (drop-in guarantee) ==="
+"$(cd "$(dirname "$0")" && pwd)/check-interface.sh" "${SRC_DIR}" "${OUTPUT_DIR}"
+
 # Default: skip validate. `tofu init`/`validate` would resolve providers from
 # the OpenTofu registry, which may not carry every provider a third-party module
 # pins — and validate is non-essential here. fmt is offline/safe and always run.
