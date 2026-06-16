@@ -211,6 +211,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/terraform.json", srv.handleServiceDiscovery)
 	mux.HandleFunc("/v1/modules/", srv.handleModules)
+	mux.HandleFunc("/v1/catalog", srv.handleCatalog)
 	mux.HandleFunc("/m/", srv.handleDirectModule)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
