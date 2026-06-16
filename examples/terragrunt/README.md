@@ -11,6 +11,10 @@ model-a-registry/        # pull hardened module via tfr:// (server-gated)
 model-b-mapotf/          # patch upstream locally via before_hook (no registry)
   root.hcl               #   org-wide mapotf hook + plan-gate
   s3-bucket/terragrunt.hcl
+catalog/                 # a multi-unit catalog of hardened modules (drop-in)
+  root.hcl               #   framework host, shared by every unit
+  s3-bucket/terragrunt.hcl
+  vpc/terragrunt.hcl
 ```
 
 ## Model A — registry (`tfr://`)
