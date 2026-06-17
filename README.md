@@ -110,6 +110,7 @@ The transformation-unit vocabulary:
 | `aws-vpc-flow-logs` | AWS structural | enable VPC flow logs |
 | `aws-kms-rotation`, `aws-cloudtrail-harden`, `aws-ec2-imdsv2`, `aws-ecr-harden`, `aws-cloudwatch-log-retention` | AWS structural | KMS key rotation; CloudTrail validation/multi-region; EC2 IMDSv2; ECR immutable tags + scan-on-push; CloudWatch 1y log retention |
 | `aws-ebs-encryption`, `aws-efs-encryption`, `aws-dynamodb-encryption`, `aws-sqs-encryption`, `aws-redshift-harden`, `aws-elasticache-encryption`, `aws-docdb-encryption`, `aws-neptune-encryption`, `aws-opensearch-harden` | AWS structural (encryption at rest / in transit) | force encryption on EBS, EFS, DynamoDB, SQS, Redshift, ElastiCache, DocumentDB, Neptune, OpenSearch |
+| `aws-cloudfront-https`, `aws-alb-harden`, `aws-msk-encryption`, `aws-lambda-tracing`, `aws-apigateway-harden` | AWS structural (edge/transit/observability) | CloudFront HTTPS-only + TLS1.2; ALB drop-invalid-headers; MSK TLS in transit; Lambda X-Ray; API Gateway X-Ray |
 
 > These AWS units are **generic** (typed `data "resource"` → apply to any module
 > that contains the resource, no-op otherwise) and shared by all 9 framework
