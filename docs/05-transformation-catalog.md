@@ -362,6 +362,10 @@ them, so these live in `plan-gate.sh` and assert over `terraform show -json`:
 | ELB strong TLS | `aws_lb_listener` | HTTPS/TLS listeners must pin an `ssl_policy` |
 | WAF associated | `aws_lb` (application) | an `aws_wafv2_web_acl_association` must exist |
 | API Gateway logging | `aws_api_gateway_stage` / `aws_apigatewayv2_stage` | stage must declare `access_log_settings` |
+| App Gateway TLS | `azurerm_application_gateway` | `ssl_policy` floor TLSv1_2+ (or 2017S/2022 predefined) |
+| App Gateway WAF | `azurerm_application_gateway` | WAF sku tier or `firewall_policy_id` |
+| API Management logging | `azurerm_api_management` | an `azurerm_api_management_diagnostic` must exist |
+| NSG flow logs | `azurerm_network_security_group` | an `azurerm_network_watcher_flow_log` must exist |
 
 The optional `framework` arg (e.g. `pci_dss`, `hipaa`, `nist_800_53`) only
 swaps the clause IDs printed in each label — the assertions are identical.
