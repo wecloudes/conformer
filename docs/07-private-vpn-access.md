@@ -65,24 +65,99 @@ sudo wg            # shows handshake once the client connects
 No NAT/forwarding rules are needed — peers talk straight to `10.13.13.1`, where
 the registry listens.
 
-## 4. Point the registry at the VPN interface
+## 4. Start the stack bound to the VPN (docker compose)
 
-In `compose/.env`:
-
-```bash
-BIND_IP=10.13.13.1
-# Presigned download URLs must use a VPN-reachable host (the S3 signature binds
-# it — a localhost/public host would not resolve for the peer):
-S3_PUBLIC_ENDPOINT=10.13.13.1:7070
-```
-
-Restart: `docker compose -f compose/docker-compose.yml up -d`. Confirm the ports
-are no longer on `0.0.0.0`:
+From the repo root, create `.env` and point the published ports at the wg0
+address:
 
 ```bash
-docker compose -f compose/docker-compose.yml ps   # ports show 10.13.13.1:443->443, etc.
-ss -ltnp | grep -E ':443|:7070'                   # bound to 10.13.13.1, not 0.0.0.0
+cp compose/.env.example compose/.env
+# edit compose/.env:
+#   STATIC_TOKENS=<your-token>=cis_v600,ens_high   # entitlement inside the VPN
+#   BIND_IP=10.13.13.1                             # bind every port to wg0
+#   S3_PUBLIC_ENDPOINT=10.13.13.1:7070             # presign host must be VPN-reachable
 ```
+
+`BIND_IP` is the only change versus a public deploy — every published port
+(Caddy 80/443, versitygw 7070) binds the VPN interface instead of `0.0.0.0`.
+`S3_PUBLIC_ENDPOINT` must also be the VPN host: the S3 signature binds the
+hostname, so a `localhost`/public value would not resolve for a remote peer.
+
+Build the image once, then bring it up:
+
+```bash
+make image                                        # build conformer-registry-api:latest
+docker compose -f compose/docker-compose.yml up -d
+```
+
+Confirm the ports left `0.0.0.0`:
+
+```bash
+docker compose -f compose/docker-compose.yml ps   # ports show 10.13.13.1:443->443, 10.13.13.1:7070->7070
+sudo ss -ltnp | grep -E ':443|:7070'              # LISTEN on 10.13.13.1, NOT 0.0.0.0
+```
+
+If `ss` still shows `0.0.0.0:443`, `BIND_IP` was not picked up — re-run `up -d`
+after fixing `compose/.env`.
+
+## Add users (WireGuard peers)
+
+Each "user" is a WireGuard peer. The helper
+[`compose/wireguard/add-peer.sh`](../compose/wireguard/add-peer.sh) generates a
+keypair, registers the peer on the server (live **and** persisted to `wg0.conf`),
+auto-assigns the next free tunnel IP, and writes the client config — run it on
+the **server**, as root:
+
+```bash
+cd compose/wireguard
+sudo ENDPOINT=<server-public-ip>:51820 ./add-peer.sh laptop
+#   peer 'laptop' added at 10.13.13.2 -> ./laptop.conf
+sudo ENDPOINT=<server-public-ip>:51820 ./add-peer.sh ci-runner 10.13.13.7   # explicit IP
+```
+
+Hand the printed `<name>.conf` to that user over a secure channel (it holds their
+private key — never commit it; `.gitignore` already excludes `wireguard/*.conf`).
+On mobile, install `qrencode` on the server and the script prints a scannable QR.
+
+Manual equivalent (no script):
+
+```bash
+# on the client: make a keypair, send ONLY the public key to the admin
+wg genkey | tee laptop.key | wg pubkey > laptop.pub
+
+# on the server: register the peer (live + persist the same block in wg0.conf)
+sudo wg set wg0 peer "$(cat laptop.pub)" allowed-ips 10.13.13.2/32
+```
+
+**Remove a user:**
+
+```bash
+sudo wg set wg0 peer <THEIR_PUBLIC_KEY> remove   # live
+# then delete that [Peer] block from /etc/wireguard/wg0.conf so it doesn't return
+```
+
+## Connect a client (laptop / CI)
+
+1. Install WireGuard (step 1).
+2. Drop the `<name>.conf` you were given at `/etc/wireguard/wg0.conf`
+   (or import it in the GUI app / via the QR).
+3. Bring the tunnel up and confirm the handshake:
+   ```bash
+   sudo wg-quick up wg0
+   sudo wg            # "latest handshake" appears within a few seconds
+   ping 10.13.13.1    # the registry host over the tunnel
+   ```
+4. Resolve `*.conformer.local` to the tunnel IP (§5 below) and trust the Caddy CA
+   (§6). Then consume the registry exactly as in
+   [compose/README.md §Consume](../compose/README.md) — over the VPN it now works,
+   off the VPN it does not.
+
+```bash
+# quick check over the tunnel:
+curl -sk --resolve conformer.local:443:10.13.13.1 https://conformer.local/v1/catalog | jq .domain
+```
+
+Tear down with `sudo wg-quick down wg0` when done.
 
 ## 5. Client name resolution
 
