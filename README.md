@@ -83,6 +83,16 @@ documentation. The build applies the DIY transformation playbook in layers:
 | Advisory toggles | `variable { validation }` | source-time opt-out flags per control |
 | Plan-time gate | `terraform show -json` + `jq` | assert caller config satisfies controls at plan time, incl. edge/transit asserts a source-time force can't reach — AWS: ELB TLS, WAF association, API Gateway logging; Azure: App Gateway TLS+WAF, APIM diagnostics, NSG flow logs (`scripts/plan-gate.sh [planfile] [framework]`; `--self-test` for canned plans) |
 
+Two control classes underlie all of this — **enforcements** and **assertions**:
+*enforce what you can control, assert what you can only observe.* An
+**enforcement** is an absolute, caller-independent value mapotf writes into the
+module before plan (encryption on, TLS floor, public-access off); an
+**assertion** verifies a caller-supplied or plan-only value at plan time and
+fails CI — via in-module `check {}` units (`aws-s3-checks-<fw>`) or the external
+`plan-gate.sh`. Each framework = a bundle of enforcement units + the assertions
+covering what a force can't reach. Full breakdown incl. per-framework enforcement
+counts and clause IDs: [docs/02 §enforcements-and-assertions-per-framework](docs/02-enforcement-models.md#enforcements-and-assertions-per-framework).
+
 The structural layer is driven by composable **transformation units**: atomic
 [`mapotf`](https://github.com/Azure/mapotf) rule sets at
 `transformations/<unit>/{_default,<module>}/rules.mptf.hcl`, where `_default/`
