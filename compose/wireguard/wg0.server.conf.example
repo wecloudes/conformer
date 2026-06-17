@@ -1,0 +1,26 @@
+# WireGuard SERVER config — runs on the host that runs the registry stack.
+# Copy to /etc/wireguard/wg0.conf, fill the keys, then: `wg-quick up wg0`.
+#
+# Generate keys:
+#   wg genkey | tee server.key | wg pubkey > server.pub
+#   wg genkey | tee laptop.key | wg pubkey > laptop.pub
+#
+# The registry binds its ports to this interface's address (10.13.13.1) via
+# BIND_IP in compose/.env, so the registry is reachable only by peers below.
+# Only 51820/udp needs to be open on the host's PUBLIC interface.
+
+[Interface]
+Address = 10.13.13.1/24
+ListenPort = 51820
+PrivateKey = <SERVER_PRIVATE_KEY>
+
+# No NAT/forwarding is required: peers talk directly to 10.13.13.1, where the
+# registry listens. (Add PostUp/PostDown iptables MASQUERADE only if you also
+# want peers to reach the wider host network — not needed for the registry.)
+
+[Peer]
+# laptop / CI runner
+PublicKey = <LAPTOP_PUBLIC_KEY>
+AllowedIPs = 10.13.13.2/32
+
+# Add one [Peer] block per client, incrementing the /32 (10.13.13.3, .4, ...).
