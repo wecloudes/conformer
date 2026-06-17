@@ -5,3 +5,5 @@ caddy-root.crt
 wireguard/wg0.conf
 wireguard/*.key
 wireguard/*.pub
+wireguard/*.conf
+!wireguard/*.conf.example
