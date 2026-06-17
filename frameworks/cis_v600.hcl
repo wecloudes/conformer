@@ -32,4 +32,9 @@ transformations = [
   "aws-sqs-encryption",
   "aws-cloudwatch-log-retention",
   "aws-opensearch-harden",
+  "aws-apigateway-harden",
+  "aws-alb-harden",
+  "aws-cloudfront-https",
+  "aws-lambda-tracing",
+  "aws-msk-encryption",
 ]
