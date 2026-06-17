@@ -346,7 +346,27 @@ hardcoded ARN, skipped on an AVM module.
 | Every module (generic) | `transformations/<unit>/_default/rules.mptf.hcl` (a unit may ship several `*.mptf.hcl` here) |
 | One module (module-specific) | `transformations/<unit>/<module>/rules.mptf.hcl` (mirrors upstream layout; optional `patch.hcl` advisory toggles) |
 | Bundle of units | `frameworks/<framework>.hcl` → `transformations = ["unit", …]` |
-| Plan-time gate | `scripts/plan-gate.sh` |
+| Plan-time gate | `scripts/plan-gate.sh [planfile] [framework]` |
+
+### Plan-gate asserts (controls a source-time force cannot reach)
+
+Some edge/transit controls target **internal module resources** — an ALB
+listener, a WAFv2 association, an API Gateway stage — that a generic
+`data "resource"` force can't address (we don't know the module's variable
+interface, and the resource is created inside the module). The plan *does* see
+them, so these live in `plan-gate.sh` and assert over `terraform show -json`:
+
+| Assert | Resource | Bar |
+|---|---|---|
+| ELB no cleartext | `aws_lb_listener` | plain-HTTP listeners must redirect to HTTPS |
+| ELB strong TLS | `aws_lb_listener` | HTTPS/TLS listeners must pin an `ssl_policy` |
+| WAF associated | `aws_lb` (application) | an `aws_wafv2_web_acl_association` must exist |
+| API Gateway logging | `aws_api_gateway_stage` / `aws_apigatewayv2_stage` | stage must declare `access_log_settings` |
+
+The optional `framework` arg (e.g. `pci_dss`, `hipaa`, `nist_800_53`) only
+swaps the clause IDs printed in each label — the assertions are identical.
+`scripts/plan-gate.sh --self-test` runs them against canned plans (no
+terraform needed).
 
 ### Consumption
 
