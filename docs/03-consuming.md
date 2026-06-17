@@ -65,7 +65,8 @@ What `harden.sh` does:
    then `.../aws-s3-checks-cis/s3-bucket`, plus the generics
    `.../tags/_default`, `.../destroy/_default`, `.../aws-secure-defaults/_default`
 3. `terraform plan -out tfplan`
-4. `scripts/plan-gate.sh tfplan` — jq assertions; non-zero exit fails CI
+4. `scripts/plan-gate.sh tfplan <framework>` — jq assertions (S3 + edge/transit:
+   ELB TLS, WAF association, API Gateway logging); non-zero exit fails CI
 5. `mapotf reset` — restores `./upstream`
 
 Model B now selects **units**, not a monolithic per-framework patch dir. A
