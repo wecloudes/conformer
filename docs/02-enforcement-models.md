@@ -50,8 +50,12 @@ Every framework is a **bundle of enforcement units** plus the **assertions** tha
 cover the controls a force can't. The nine cross-cloud frameworks share an
 identical enforcement set (43 units: 4 generic/meta + 23 AWS force + 16 Azure
 force) and differ only in their one in-module S3 check unit and the clause IDs
-their plan-gate run prints. **ENS** is Azure-only by design (no AWS units, no S3
-check unit).
+their plan-gate run prints. The **ENS** family is split by cloud: `ens` is
+Azure-only (no AWS units, no S3 check unit), while `ens_low` / `ens_medium` /
+`ens_high` are the AWS CCN-ENS conformance-pack levels — an AWS-only force-able
+subset (17 units + `aws-s3-checks-ens`). The three AWS levels bundle the same
+units: the CCN-ENS packs are ~identical (112/113/114 Config rules) and differ
+only in detective rules outside source-time forcing.
 
 | Framework | Enforcement units | In-module assert unit | Plan-gate asserts (always 11: 3 S3 + 4 AWS-edge + 4 Azure) |
 |---|---|---|---|
@@ -65,6 +69,7 @@ check unit).
 | `gdpr` | 43 | `aws-s3-checks-gdpr` | ✓ |
 | `nis2` | 43 | `aws-s3-checks-nis2` | ✓ |
 | `ens` | 19 (generic + Azure only) | — (Azure-only; no S3 unit) | only the 4 Azure asserts fire (no AWS resources in plan) |
+| `ens_low` / `ens_medium` / `ens_high` | 17 (generic + AWS subset) | `aws-s3-checks-ens` | the AWS asserts fire (3 S3 + 4 AWS-edge) |
 
 The plan-gate asserts are the same checks for every framework; only the **cited
 clause ID** changes per framework (`scripts/plan-gate.sh`'s `cite()`):
@@ -80,7 +85,8 @@ clause ID** changes per framework (`scripts/plan-gate.sh`'s `cite()`):
 | `fedramp` | NIST SC-8 | NIST SC-7 | NIST AU-2 | NIST AU-12 / SC-7 |
 | `gdpr` | GDPR Art.32(1)(a) | GDPR Art.32(1)(b) | GDPR Art.30 | GDPR Art.30 |
 | `nis2` | NIS2 Art.21(2)(h) | NIS2 Art.21(2)(e) | NIS2 Art.21(2)(i) | NIS2 Art.21(2)(i) |
-| `ens` | ENS mp.com.3 | ENS mp.com.1 | ENS op.exp | ENS op.exp |
+| `ens` (Azure) | ENS mp.com.3 | ENS mp.com.1 | ENS op.exp.8 | ENS op.exp.8 |
+| `ens_low` / `ens_medium` / `ens_high` (AWS) | ENS mp.com.3 | ENS mp.com.1 | ENS op.exp.8 | ENS op.exp.8 |
 
 The three S3 plan-gate asserts (public-access fully blocked, SSE present,
 versioning present) are framework-independent and always run; they back the
