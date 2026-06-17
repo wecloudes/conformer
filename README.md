@@ -81,7 +81,7 @@ documentation. The build applies the DIY transformation playbook in layers:
 | Block removal | `awk` brace-counter | strip injected `provisioner` / `local-exec` blocks |
 | Structural | `mapotf` + `hcledit` | inject `lifecycle { prevent_destroy }`, override insecure attributes (e.g. force public-access flags shut), add plan-time `check` blocks |
 | Advisory toggles | `variable { validation }` | source-time opt-out flags per control |
-| Plan-time gate | `terraform show -json` + `jq` | assert caller config satisfies controls at plan time, incl. edge/transit asserts a source-time force can't reach — ELB TLS, WAF association, API Gateway logging (`scripts/plan-gate.sh [planfile] [framework]`; `--self-test` for canned plans) |
+| Plan-time gate | `terraform show -json` + `jq` | assert caller config satisfies controls at plan time, incl. edge/transit asserts a source-time force can't reach — AWS: ELB TLS, WAF association, API Gateway logging; Azure: App Gateway TLS+WAF, APIM diagnostics, NSG flow logs (`scripts/plan-gate.sh [planfile] [framework]`; `--self-test` for canned plans) |
 
 The structural layer is driven by composable **transformation units**: atomic
 [`mapotf`](https://github.com/Azure/mapotf) rule sets at
