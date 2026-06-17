@@ -543,7 +543,11 @@ var frameworkMap = map[string]string{
 	"soc2":     "soc2",
 	"hipaa":    "hipaa",
 	"pci":      "pci_dss",
+	"pci-dss":  "pci_dss",
 	"nist":     "nist_800_53",
+	"gdpr":     "gdpr",
+	"fedramp":  "fedramp",
+	"nis2":     "nis2",
 }
 
 // mapFramework resolves a friendly framework name to its storage path; unknown
