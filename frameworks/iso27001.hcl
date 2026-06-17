@@ -35,4 +35,22 @@ transformations = [
   "aws-cloudfront-https",
   "aws-lambda-tracing",
   "aws-msk-encryption",
+
+  # --- Azure (azurerm) equivalents ---
+  "azure-storage-harden",
+  "azure-manageddisk-harden",
+  "azure-cdn-https",
+  "azure-keyvault-harden",
+  "azure-keyvault-key-rotation",
+  "azure-loganalytics-retention",
+  "azure-acr-harden",
+  "azure-aks-harden",
+  "azure-functionapp-harden",
+  "azure-appservice-harden",
+  "azure-cosmosdb-harden",
+  "azure-redis-harden",
+  "azure-mssql-harden",
+  "azure-eventhub-harden",
+  "azure-servicebus-harden",
+  "azure-search-harden",
 ]
