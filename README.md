@@ -108,6 +108,12 @@ The transformation-unit vocabulary:
 | `aws-rds-harden` | AWS structural | harden RDS instances |
 | `aws-eks-audit-logs` | AWS structural | enable EKS audit logging |
 | `aws-vpc-flow-logs` | AWS structural | enable VPC flow logs |
+| `aws-kms-rotation`, `aws-cloudtrail-harden`, `aws-ec2-imdsv2`, `aws-ecr-harden`, `aws-cloudwatch-log-retention` | AWS structural | KMS key rotation; CloudTrail validation/multi-region; EC2 IMDSv2; ECR immutable tags + scan-on-push; CloudWatch 1y log retention |
+| `aws-ebs-encryption`, `aws-efs-encryption`, `aws-dynamodb-encryption`, `aws-sqs-encryption`, `aws-redshift-harden`, `aws-elasticache-encryption`, `aws-docdb-encryption`, `aws-neptune-encryption`, `aws-opensearch-harden` | AWS structural (encryption at rest / in transit) | force encryption on EBS, EFS, DynamoDB, SQS, Redshift, ElastiCache, DocumentDB, Neptune, OpenSearch |
+
+> These AWS units are **generic** (typed `data "resource"` → apply to any module
+> that contains the resource, no-op otherwise) and shared by all 9 framework
+> bundles. Full live list: `GET /v1/catalog`.
 | `aws-s3-checks-cis` / `aws-s3-checks-iso27001` / `aws-s3-checks-soc2` | framework S3 plan-time checks | per-framework S3 `check` blocks |
 
 ### Two ways to consume
