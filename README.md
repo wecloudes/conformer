@@ -3,7 +3,8 @@
 **Conform any Terraform module to a compliance framework — without forking it.**
 
 Conformer is a framework-aware Terraform/OpenTofu module registry that transforms
-upstream modules to a compliance framework (CIS, ISO 27001, SOC 2, …) on the fly.
+upstream modules to a compliance framework (CIS, ISO 27001, SOC 2, PCI DSS,
+HIPAA, NIST 800-53, FedRAMP, GDPR, NIS2) on the fly.
 Compliance content is decomposed into atomic, composable **transformation units**;
 a **framework** is just a named bundle of those units. Point Terraform at a
 framework subdomain and Conformer fetches the upstream module, expands the

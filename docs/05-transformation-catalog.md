@@ -521,17 +521,21 @@ both resolve to the same flat list of units and apply them identically. For each
 unit it applies the generic `_default/*.mptf.hcl` (any module) plus any
 `<module>/…/rules.mptf.hcl` that matches the module being built; units with no
 rules for that module are silently skipped (a no-op), so the same bundle hardens
-any module. The three shipped frameworks differ in **one** entry only:
+any module. The **nine** shipped frameworks (`cis_v600`, `iso27001`, `soc2`,
+`pci_dss`, `hipaa`, `nist_800_53`, `fedramp`, `gdpr`, `nis2`) differ in **one**
+entry only — their `aws-s3-checks-<fw>` unit, which carries that framework's
+clause IDs (CIS 2.1.x, SOC2 CCx, PCI DSS 3.5.1/4.2.1/10.2.1, HIPAA §164.312,
+NIST SC-28/SC-8/AU-2, GDPR Art.32, NIS2 Art.21, …):
 
 ```hcl
-# frameworks/cis_v600.hcl  (iso27001.hcl / soc2.hcl are identical except the S3 checks unit)
+# frameworks/cis_v600.hcl  (the other 8 manifests are identical except the S3 checks unit)
 transformations = [
   "avm-secure-defaults",    # generic (Azure AVM secure defaults)
-  "aws-secure-defaults",    # generic (Babenko var-defaults + AWS data-source injection)
+  "aws-secure-defaults",    # generic (Babenko var-defaults)
   "destroy",                # generic
   "tags",                   # generic
   "aws-s3-public-access",   # module: s3-bucket
-  "aws-s3-checks-cis",      # ← cis_v600 only; iso27001 → -iso27001, soc2 → -soc2
+  "aws-s3-checks-cis",      # ← per-framework: pci → -pci, hipaa → -hipaa, nist → -nist, …
   "aws-rds-harden",         # module: rds (submodule-targeted)
   "aws-vpc-flow-logs",      # module: vpc
   "aws-eks-audit-logs",     # module: eks

@@ -58,11 +58,26 @@ echo "=== [1/6] sanitize (sed + gitleaks) ==="
 # non-AWS module injects an aws_* data source the module has no provider for AND
 # corrupts any 12-digit run in descriptions/examples (e.g. Azure GUIDs). Gate it
 # on the module actually using the AWS provider.
+#
+# We rewrite to UNIQUELY-named data sources (data.aws_caller_identity.conformer /
+# data.aws_region.conformer) and declare them here in the shell — never via a
+# mapotf rule. mapotf's all-data-blocks introspection panics on modules with
+# complex data sources (e.g. aws_iam_policy_document → "AttributeTypes on
+# non-object Type"), and the unique names never collide with the module's own.
 if grep -rqiE 'provider[[:space:]]+"aws"|resource[[:space:]]+"aws_|data[[:space:]]+"aws_|hashicorp/aws' . 2>/dev/null; then
   find . -name '*.tf' -print0 | xargs -0 -r sed -i -E \
-    's/[0-9]{12}/${data.aws_caller_identity.current.account_id}/g'
+    's/[0-9]{12}/${data.aws_caller_identity.conformer.account_id}/g'
   find . -name '*.tf' -print0 | xargs -0 -r sed -i -E \
-    's/(arn:aws:[a-z0-9-]*:)(us|eu|ap|sa|ca|me|af)-[a-z]+-[0-9]/\1${data.aws_region.current.name}/g'
+    's/(arn:aws:[a-z0-9-]*:)(us|eu|ap|sa|ca|me|af)-[a-z]+-[0-9]/\1${data.aws_region.conformer.name}/g'
+  # Declare the referenced data sources, but only if the rewrite actually
+  # produced a reference (keeps clean modules untouched).
+  if grep -rqE 'data\.aws_(caller_identity|region)\.conformer' --include='*.tf' . 2>/dev/null; then
+    cat > _conformer_datasources.tf <<'TF'
+# Injected by conformer to back the account-id / region sanitization rewrites.
+data "aws_caller_identity" "conformer" {}
+data "aws_region" "conformer" {}
+TF
+  fi
 else
   echo "  (non-AWS module — skipping AWS account-id/region sanitization)"
 fi
