@@ -1,0 +1,20 @@
+# WireGuard CLIENT config — the laptop / CI runner that consumes the registry.
+# Copy to /etc/wireguard/wg0.conf on the client, fill keys + the server's public
+# IP, then: `wg-quick up wg0`. The registry is then reachable at the server's
+# tunnel address (10.13.13.1) and nowhere else.
+
+[Interface]
+Address = 10.13.13.2/32
+PrivateKey = <LAPTOP_PRIVATE_KEY>
+# Optional: resolve *.conformer.local via a DNS server on the registry host
+# (e.g. dnsmasq bound to 10.13.13.1). If you instead use /etc/hosts entries
+# (see docs/07), drop this line.
+# DNS = 10.13.13.1
+
+[Peer]
+PublicKey = <SERVER_PUBLIC_KEY>
+Endpoint = <SERVER_PUBLIC_IP>:51820
+# Only route the tunnel subnet through the VPN (split tunnel). Use 0.0.0.0/0 to
+# route all traffic instead.
+AllowedIPs = 10.13.13.0/24
+PersistentKeepalive = 25

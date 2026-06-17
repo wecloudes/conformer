@@ -66,7 +66,11 @@ services:
     volumes:
       - vgw-data:/data
     ports:
-      - "7070:7070"   # S3 API — published so presigned download URLs resolve from the host
+      # Bind address defaults to 0.0.0.0 (public). Set BIND_IP to a VPN interface
+      # IP (e.g. the WireGuard wg0 address) to expose the registry ONLY over the
+      # VPN — see docs/07-private-vpn-access.md. Presigned download URLs are
+      # served from here, so it must share the same reachability as Caddy.
+      - "${BIND_IP:-0.0.0.0}:7070:7070"   # S3 API — presigned download URLs resolve from the host
     restart: unless-stopped
 
   caddy:
@@ -74,8 +78,11 @@ services:
     depends_on:
       - registry-api
     ports:
-      - "443:443"
-      - "80:80"
+      # Default 0.0.0.0 (public). Set BIND_IP to a VPN interface IP (WireGuard
+      # wg0) to make the registry reachable ONLY over the VPN. The sole port that
+      # must stay public is then WireGuard's 51820/udp on the host (not here).
+      - "${BIND_IP:-0.0.0.0}:443:443"
+      - "${BIND_IP:-0.0.0.0}:80:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

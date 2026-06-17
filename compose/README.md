@@ -95,6 +95,20 @@ Switch framework = change the subdomain (`soc2.conformer.local`). The token must
 be entitled to that framework in `STATIC_TOKENS`. The direct `/m/` mode (section
 2a) needs no token.
 
+## Private / VPN-only access
+
+By default Caddy (`80`/`443`) and versitygw (`7070`) bind `0.0.0.0` (public). To
+make the registry reachable **only over a VPN**, set `BIND_IP` in `.env` to your
+VPN interface IP (e.g. the WireGuard `wg0` address) — every published port then
+binds there instead, and the only public port is the VPN's own. Full self-hosted
+WireGuard walkthrough: [docs/07-private-vpn-access.md](../docs/07-private-vpn-access.md).
+
+```bash
+# .env
+BIND_IP=10.13.13.1               # wg0 address
+S3_PUBLIC_ENDPOINT=10.13.13.1:7070   # presign host must be VPN-reachable
+```
+
 ## Auth modes
 
 - **static** (default) — bearer tokens in `STATIC_TOKENS`, mapped to frameworks.

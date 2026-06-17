@@ -1,2 +1,7 @@
 .env
 caddy-root.crt
+
+# WireGuard real configs / keys (templates *.example are tracked)
+wireguard/wg0.conf
+wireguard/*.key
+wireguard/*.pub
