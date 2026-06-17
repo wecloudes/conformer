@@ -111,10 +111,16 @@ The transformation-unit vocabulary:
 | `aws-kms-rotation`, `aws-cloudtrail-harden`, `aws-ec2-imdsv2`, `aws-ecr-harden`, `aws-cloudwatch-log-retention` | AWS structural | KMS key rotation; CloudTrail validation/multi-region; EC2 IMDSv2; ECR immutable tags + scan-on-push; CloudWatch 1y log retention |
 | `aws-ebs-encryption`, `aws-efs-encryption`, `aws-dynamodb-encryption`, `aws-sqs-encryption`, `aws-redshift-harden`, `aws-elasticache-encryption`, `aws-docdb-encryption`, `aws-neptune-encryption`, `aws-opensearch-harden` | AWS structural (encryption at rest / in transit) | force encryption on EBS, EFS, DynamoDB, SQS, Redshift, ElastiCache, DocumentDB, Neptune, OpenSearch |
 | `aws-cloudfront-https`, `aws-alb-harden`, `aws-msk-encryption`, `aws-lambda-tracing`, `aws-apigateway-harden` | AWS structural (edge/transit/observability) | CloudFront HTTPS-only + TLS1.2; ALB drop-invalid-headers; MSK TLS in transit; Lambda X-Ray; API Gateway X-Ray |
+| `azure-storage-harden`, `azure-manageddisk-harden`, `azure-cdn-https` | Azure structural | Storage account TLS1.2 + secure-transfer + block-public-blob; managed-disk public access off; CDN HTTPS-only |
+| `azure-keyvault-harden`, `azure-keyvault-key-rotation`, `azure-loganalytics-retention` | Azure structural | Key Vault purge-protection; Key Vault key auto-rotation policy; Log Analytics 1y retention |
+| `azure-acr-harden`, `azure-aks-harden`, `azure-functionapp-harden`, `azure-appservice-harden` | Azure structural | ACR admin/anon-pull off; AKS local-account off + RBAC + Azure Policy; Function App / Web App HTTPS-only |
+| `azure-cosmosdb-harden`, `azure-redis-harden`, `azure-mssql-harden` | Azure structural (data stores) | Cosmos TLS1.2 + local-auth off; Redis TLS1.2 + non-SSL port off; SQL/PostgreSQL/MySQL TLS + private access |
+| `azure-eventhub-harden`, `azure-servicebus-harden`, `azure-search-harden` | Azure structural (messaging/search) | Event Hubs / Service Bus TLS1.2 + local-auth off + private; Cognitive Search local-auth off + private |
 
-> These AWS units are **generic** (typed `data "resource"` → apply to any module
-> that contains the resource, no-op otherwise) and shared by all 9 framework
-> bundles. Full live list: `GET /v1/catalog`.
+> These AWS **and Azure** units are **generic** (typed `data "resource"` → apply
+> to any module that contains the resource, no-op otherwise) and shared by all 9
+> framework bundles, so the same bundle hardens an AWS or an Azure module — each
+> unit just no-ops where its resource is absent. Full live list: `GET /v1/catalog`.
 | `aws-s3-checks-cis` / `aws-s3-checks-iso27001` / `aws-s3-checks-soc2` | framework S3 plan-time checks | per-framework S3 `check` blocks |
 
 ### Two ways to consume
