@@ -35,7 +35,7 @@ cite() {
     elb:gdpr) echo "GDPR Art.32(1)(a)" ;;
     elb:nis2) echo "NIS2 Art.21(2)(h)" ;;
     elb:cis_v600) echo "CIS AWS 4.x" ;;
-    elb:ens) echo "ENS mp.com.3" ;;
+    elb:ens|elb:ens_low|elb:ens_medium|elb:ens_high) echo "ENS mp.com.3" ;;
     elb:*) echo "AWS Config elb-tls-listener" ;;
 
     waf:pci_dss) echo "PCI DSS 6.4.2" ;;
@@ -46,7 +46,7 @@ cite() {
     waf:gdpr) echo "GDPR Art.32(1)(b)" ;;
     waf:nis2) echo "NIS2 Art.21(2)(e)" ;;
     waf:cis_v600) echo "CIS AWS 4.x" ;;
-    waf:ens) echo "ENS mp.com.1" ;;
+    waf:ens|waf:ens_low|waf:ens_medium|waf:ens_high) echo "ENS mp.com.1" ;;
     waf:*) echo "AWS Config waf-associated" ;;
 
     apigw:pci_dss) echo "PCI DSS 10.2.1" ;;
@@ -57,7 +57,7 @@ cite() {
     apigw:gdpr) echo "GDPR Art.30" ;;
     apigw:nis2) echo "NIS2 Art.21(2)(i)" ;;
     apigw:cis_v600) echo "CIS AWS 4.x" ;;
-    apigw:ens) echo "ENS op.exp" ;;
+    apigw:ens|apigw:ens_low|apigw:ens_medium|apigw:ens_high) echo "ENS op.exp.8" ;;
     apigw:*) echo "AWS Config api-gw-access-logging" ;;
 
     nsg:pci_dss) echo "PCI DSS 10.2.1" ;;
@@ -68,7 +68,7 @@ cite() {
     nsg:gdpr) echo "GDPR Art.30" ;;
     nsg:nis2) echo "NIS2 Art.21(2)(i)" ;;
     nsg:cis_v600) echo "CIS Azure 6.x" ;;
-    nsg:ens) echo "ENS op.exp" ;;
+    nsg:ens|nsg:ens_low|nsg:ens_medium|nsg:ens_high) echo "ENS op.exp.8" ;;
     nsg:*) echo "Azure flow-logs-enabled" ;;
   esac
 }

@@ -538,18 +538,21 @@ func (s *Server) extractFramework(host string) string {
 // frameworkMap maps friendly framework names (subdomains / ?framework=) to the
 // storage-path / manifest name (frameworks/<path>.hcl).
 var frameworkMap = map[string]string{
-	"cis":       "cis_v600",
-	"iso27001":  "iso27001",
-	"soc2":      "soc2",
-	"hipaa":     "hipaa",
-	"pci":       "pci_dss",
-	"pci-dss":   "pci_dss",
-	"nist":      "nist_800_53",
-	"gdpr":      "gdpr",
-	"fedramp":   "fedramp",
-	"nis2":      "nis2",
-	"ens":       "ens",
-	"spain-ens": "ens",
+	"cis":        "cis_v600",
+	"iso27001":   "iso27001",
+	"soc2":       "soc2",
+	"hipaa":      "hipaa",
+	"pci":        "pci_dss",
+	"pci-dss":    "pci_dss",
+	"nist":       "nist_800_53",
+	"gdpr":       "gdpr",
+	"fedramp":    "fedramp",
+	"nis2":       "nis2",
+	"ens":        "ens",
+	"spain-ens":  "ens",
+	"ens-low":    "ens_low",
+	"ens-medium": "ens_medium",
+	"ens-high":   "ens_high",
 }
 
 // mapFramework resolves a friendly framework name to its storage path; unknown
