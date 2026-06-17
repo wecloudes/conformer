@@ -12,6 +12,80 @@ module-specific ones. A **framework** is a manifest (`frameworks/<framework>.hcl
 listing `transformations = ["unit", ...]` — a named bundle of units. The same
 units drive both models.
 
+## Two control classes: enforcements and assertions
+
+Orthogonal to *where* a control runs (Model A/B above): **every control is one of
+two kinds.** This is the whole compliance model in one line — *enforce what you
+can control, assert what you can only observe.*
+
+| | **Enforcement (force)** | **Assertion (assert)** |
+|---|---|---|
+| When the value is… | absolute, caller-independent | caller-supplied, or in an internal module resource a generic force can't reach |
+| Mechanism | mapotf rewrites module source **before plan** | verify **at plan**, fail CI |
+| The caller… | *cannot* get it wrong | picks the value; we check the bar |
+| Implemented by | `update_in_place` / `override` on resources + `lifecycle` meta; secure-default var overrides | in-module `check {}` blocks **and** external `plan-gate.sh` (jq over `terraform show -json`) |
+| Units | every `_default/` + `<module>/` `rules.mptf.hcl` (e.g. encryption on, TLS floor, public-access off, `https_only`); `destroy`, `tags`, `avm-secure-defaults`, `aws-secure-defaults` | `aws-s3-checks-<fw>` (in-module) + the `plan-gate.sh` asserts (external) |
+
+The deciding rule: **value absolute → enforce; value caller's or plan-only →
+assert.** Forcing a caller-supplied value would either break the module or be
+silently overridden; asserting an absolute value is just a weaker way to enforce
+it. (The advisory `variable { validation }` toggles in `patch.hcl` are *opt-outs
+on the enforcement side*, not a third class — see the spectrum below.)
+
+### Assertions have two homes
+
+- **In-module `check {}`** — shipped as a `*-checks-<fw>` unit, injected into the
+  module so the assertion travels with the source. Today: `aws-s3-checks-<fw>`
+  (per-framework S3 control IDs).
+- **External `plan-gate.sh`** — `jq` over the saved plan. Catches what no
+  source-time force can reach: caller-supplied values that resolve only at plan
+  time (S3 SSE / versioning / public-access) and **internal module resources**
+  (ALB listener, WAF association, API Gateway stage; Azure App Gateway, APIM,
+  NSG). Run `scripts/plan-gate.sh tfplan <framework>` — the framework arg only
+  swaps the clause IDs printed; the assertions are identical.
+
+## Enforcements and assertions per framework
+
+Every framework is a **bundle of enforcement units** plus the **assertions** that
+cover the controls a force can't. The nine cross-cloud frameworks share an
+identical enforcement set (43 units: 4 generic/meta + 23 AWS force + 16 Azure
+force) and differ only in their one in-module S3 check unit and the clause IDs
+their plan-gate run prints. **ENS** is Azure-only by design (no AWS units, no S3
+check unit).
+
+| Framework | Enforcement units | In-module assert unit | Plan-gate asserts (always 11: 3 S3 + 4 AWS-edge + 4 Azure) |
+|---|---|---|---|
+| `cis_v600` | 43 (generic + AWS + Azure) | `aws-s3-checks-cis` | ✓ tagged below |
+| `iso27001` | 43 | `aws-s3-checks-iso27001` | ✓ |
+| `soc2` | 43 | `aws-s3-checks-soc2` | ✓ |
+| `pci_dss` | 43 | `aws-s3-checks-pci` | ✓ |
+| `hipaa` | 43 | `aws-s3-checks-hipaa` | ✓ |
+| `nist_800_53` | 43 | `aws-s3-checks-nist` | ✓ |
+| `fedramp` | 43 | `aws-s3-checks-fedramp` | ✓ |
+| `gdpr` | 43 | `aws-s3-checks-gdpr` | ✓ |
+| `nis2` | 43 | `aws-s3-checks-nis2` | ✓ |
+| `ens` | 19 (generic + Azure only) | — (Azure-only; no S3 unit) | only the 4 Azure asserts fire (no AWS resources in plan) |
+
+The plan-gate asserts are the same checks for every framework; only the **cited
+clause ID** changes per framework (`scripts/plan-gate.sh`'s `cite()`):
+
+| Framework | TLS (ELB / App Gateway) | WAF | Logging (API GW / APIM) | Flow logs (NSG) |
+|---|---|---|---|---|
+| `cis_v600` | CIS AWS 4.x | CIS AWS 4.x | CIS AWS 4.x | CIS Azure 6.x |
+| `iso27001` | ISO 27001 A.8.24 | ISO 27001 A.8.23 | ISO 27001 A.8.15 | ISO 27001 A.8.16 |
+| `soc2` | SOC2 CC6.7 | SOC2 CC6.6 | SOC2 CC7.2 | SOC2 CC7.2 |
+| `pci_dss` | PCI DSS 4.2.1 | PCI DSS 6.4.2 | PCI DSS 10.2.1 | PCI DSS 10.2.1 |
+| `hipaa` | §164.312(e)(1) | §164.312(c)(1) | §164.312(b) | §164.312(b) |
+| `nist_800_53` | NIST SC-8 | NIST SC-7 | NIST AU-2 | NIST AU-12 / SC-7 |
+| `fedramp` | NIST SC-8 | NIST SC-7 | NIST AU-2 | NIST AU-12 / SC-7 |
+| `gdpr` | GDPR Art.32(1)(a) | GDPR Art.32(1)(b) | GDPR Art.30 | GDPR Art.30 |
+| `nis2` | NIS2 Art.21(2)(h) | NIS2 Art.21(2)(e) | NIS2 Art.21(2)(i) | NIS2 Art.21(2)(i) |
+| `ens` | ENS mp.com.3 | ENS mp.com.1 | ENS op.exp | ENS op.exp |
+
+The three S3 plan-gate asserts (public-access fully blocked, SSE present,
+versioning present) are framework-independent and always run; they back the
+in-module `aws-s3-checks-<fw>` unit with a plan-level check.
+
 ## Model A — registry (server-gated)
 
 The transform runs **once**, at build time, in the compose builder (or on demand
