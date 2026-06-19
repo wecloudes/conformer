@@ -74,9 +74,19 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2.8-alpine
+    image: conformer-caddy:latest
+    build:
+      context: ..
+      dockerfile: compose/caddy/Dockerfile
     depends_on:
       - registry-api
+    environment:
+      # Registry domain + TLS strategy. Defaults give the local-CA dev setup;
+      # set DOMAIN + CADDY_TLS (+ CF_API_TOKEN) in .env for a real DNS-01 cert.
+      DOMAIN: ${DOMAIN:-conformer.local}
+      CADDY_GLOBAL: ${CADDY_GLOBAL:-}
+      CADDY_SITE_TLS: ${CADDY_SITE_TLS-tls internal}
+      CF_API_TOKEN: ${CF_API_TOKEN:-}
     ports:
       # Default 0.0.0.0 (public). Set BIND_IP to a VPN interface IP (WireGuard
       # wg0) to make the registry reachable ONLY over the VPN. The sole port that

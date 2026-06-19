@@ -179,7 +179,38 @@ tunnel IP. Two options:
 Caddy serves `tls internal`. Trust its root on each client so Terraform accepts
 the HTTPS endpoint — the root is exported at
 [`compose/caddy-root.crt`](../compose/caddy-root.crt) (or pull it from the
-running Caddy). Alternatively switch Caddy to a real domain + DNS-01 cert.
+running Caddy).
+
+### Skip the CA trust: real wildcard cert via DNS-01
+
+A publicly-trusted cert removes the per-client trust step entirely — Terraform
+accepts it natively. Because the registry is VPN-only (no public 80/443), the
+only ACME challenge that works is **DNS-01**: it proves domain control through
+your DNS provider's API, opening no ports.
+
+The framework subdomains (`cis.<DOMAIN>`, …) require a **wildcard** cert, so the
+domain's DNS must be at a provider Caddy can drive. Example with Cloudflare:
+
+1. Use the Cloudflare-DNS build of Caddy — [`compose/caddy/Dockerfile`](../compose/caddy/Dockerfile)
+   (`xcaddy build --with github.com/caddy-dns/cloudflare`); the compose `caddy`
+   service already builds it.
+2. Create a Cloudflare API token scoped to **Zone → DNS → Edit** for your zone.
+3. In `compose/.env`:
+   ```bash
+   DOMAIN=example.com
+   CADDY_GLOBAL=acme_dns cloudflare {env.CF_API_TOKEN}   # DNS-01 for all certs
+   CADDY_SITE_TLS=                                        # empty: drop `tls internal`
+   CF_API_TOKEN=<your-cloudflare-token>
+   ```
+4. `docker compose up -d` — Caddy obtains `*.example.com` + `example.com` from
+   Let's Encrypt over DNS-01 and auto-renews. No public ports, no CA to trust.
+
+Clients still resolve `*.example.com → 10.13.13.1` (the public record points at
+the now-closed public IP; the tunnel needs the override — §5). The cert
+validates by name regardless of which IP answers.
+
+Other DNS providers: swap the `caddy-dns/<provider>` plugin in the Dockerfile and
+the `cloudflare` token in `CADDY_GLOBAL`.
 
 ## 7. Verify
 
