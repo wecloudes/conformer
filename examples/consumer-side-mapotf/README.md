@@ -10,9 +10,9 @@ here locally, at plan time via `scripts/apply-transforms.sh`.
 
 | | Model A — registry | Model B — this example |
 |---|---|---|
-| Where transform runs | once, in Tekton at build | on your machine / CI, at plan time |
+| Where transform runs | once, in the registry build pipeline (`./build.sh`) | on your machine / CI, at plan time |
 | Module source | `cis.conformer.local/.../s3-bucket/aws` | real upstream, patched transiently |
-| Infra needed | K8s + MinIO + Keycloak + Tekton | just `mapotf` + `terraform` |
+| Infra needed | the compose stack (Caddy + versitygw + registry-api) | just `mapotf` + `terraform` |
 | Enforcement | mandatory (server-gated) | **opt-in** — you must run `harden.sh` |
 | Best for | regulated / untrusted consumers | internal teams, module authors |
 

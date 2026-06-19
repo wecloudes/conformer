@@ -50,7 +50,7 @@ Warm the cache or run without dynamic mode:
 ```
 
 Each runs the layered pipeline (sanitize → strip → mapotf → toggles → fmt) and
-uploads `…/cis_v600/5.11.0.zip` to MinIO.
+uploads `…/cis_v600/5.11.0.zip` to S3 (versitygw).
 
 ## 3. Local DNS + TLS (one-time)
 
