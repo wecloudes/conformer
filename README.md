@@ -55,7 +55,7 @@ The whole product is the four Compose services in [`compose/`](compose/):
 
 | Service | Tool | Purpose |
 |---|---|---|
-| `registry-api` | Custom Go service (bundled toolkit) | Terraform Module Registry Protocol v1 + `/m/` direct endpoint; builds modules on demand |
+| `registry-api` | Custom Go service (bundled toolkit) | Terraform Module Registry Protocol v1 + `/m/` (header) & `/dl/` (zip body, Terragrunt) direct endpoints; builds modules on demand |
 | `versitygw` | Versity S3 Gateway (Apache-2.0) | S3 storage for module zips (POSIX backend) |
 | `builder` | one-shot `./build.sh` (registry-api image) | Pre-build / warm the cache, upload to S3 |
 | `caddy` | Caddy | Wildcard subdomain routing + automatic local TLS |
@@ -170,6 +170,15 @@ transformation set is chosen and whether the request is gated.
   `framework=` here is ungated on purpose: the entitlement gate (which tenant may
   use which framework) lives only on the registry subdomain path. See
   [`examples/direct-transform/`](examples/direct-transform/).
+
+  `/m/` returns the module via the `X-Terraform-Get` header (Terraform follows
+  it; **go-getter does not**). For **Terragrunt**, use **`/dl/`**, which streams
+  the zip body instead — same selection and cache, version on the path:
+
+  ```hcl
+  # Terragrunt source — archive=zip forces zip handling past the query string
+  source = "https://conformer.local/dl/<ns>/<name>/<provider>/<version>.zip?archive=zip&transformation=tags"
+  ```
 
 These map onto the enforcement spectrum:
 

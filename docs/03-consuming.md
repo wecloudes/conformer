@@ -8,10 +8,11 @@ with Terraform CLI and Terragrunt. Each links to a runnable example.
 | **Model A** (registry) | [§terraform-a](#terraform--model-a-registry) | [§terragrunt-a](#terragrunt--model-a-tfr) |
 | **Model B** (direct) | [§terraform-b](#terraform--model-b-direct-mapotf) | [§terragrunt-b](#terragrunt--model-b-before_hook) |
 
-There is also a third, ungated path for ad-hoc use:
-[§direct go-getter](#terraform--direct-go-getter-mode) — point a plain `source`
-URL at the registry and ride the version + transformation set on the query
-string, no token required.
+There is also a third, ungated path for ad-hoc use — point a plain `source` URL
+at the registry and ride the version + transformation set on the query string,
+no token required: [§Terraform direct go-getter](#terraform--direct-go-getter-mode)
+(`/m/`, header redirect) and [§Terragrunt direct go-getter](#terragrunt--direct-go-getter-mode)
+(`/dl/`, streamed zip — Terragrunt cannot follow the `/m/` header).
 
 ---
 
@@ -218,6 +219,57 @@ Notes:
   may use which framework) lives only on the gated framework subdomains (Model A).
   Cache keys: `set.<units>` (units only), `<framework>` (framework only — shared
   with the subdomain path), `<framework>.plus.<units>` (combined).
+
+---
+
+## Terragrunt — direct go-getter mode (`/dl/`)
+
+Terragrunt's `source` is plain go-getter, which fetches archives but does **not**
+follow the `X-Terraform-Get` header that `/m/` returns (only Terraform's module
+installer does). So Terragrunt uses the **`/dl/`** endpoint, which streams the
+zip *body* instead. Same ad-hoc selection, same cache, same open model — version
+rides the **path** (`.../<version>.zip`), and `archive=zip` forces go-getter to
+treat the response as a zip despite the trailing query string.
+
+```hcl
+# terragrunt.hcl — ad-hoc tags-only on an upstream Azure module, no token.
+terraform {
+  source = "https://conformer.local/dl/Azure/avm-res-storage-storageaccount/azurerm/0.6.4.zip?archive=zip&transformation=tags"
+}
+```
+
+```bash
+rm -rf .terragrunt-cache    # source URL changed → force a refetch
+terragrunt init
+terragrunt plan             # applying ignore_changes=[tags] to an existing
+                            # resource is metadata only → expect 0 to add/change/destroy
+```
+
+Compose units the same way as `/m/`: `?archive=zip&transformation=tags,destroy`
+or `?archive=zip&framework=cis&transformation=tags`. Append `//.` before the `?`
+if Terragrunt asks for a subdir.
+
+**Named alternative — `tfr://` + a framework.** When the unit set is a standing
+policy you reuse across modules (not a one-off), make it a framework — a named
+bundle in `frameworks/<name>.hcl`. For example [`frameworks/tags.hcl`](../frameworks/tags.hcl)
+is the single `tags` unit, served (gated) on the `tags.` subdomain:
+
+```hcl
+# terragrunt.hcl — same module + transform via the registry protocol (gated)
+terraform {
+  source = "tfr://tags.conformer.local/Azure/avm-res-storage-storageaccount/azurerm?version=0.6.4"
+}
+```
+
+```bash
+export TG_TF_REGISTRY_TOKEN=<token entitled to the "tags" framework>
+terragrunt init && terragrunt plan
+```
+
+Pick `/dl/` for ungated one-offs; pick `tfr://<framework>` when you want a named,
+entitlement-gated, reusable set. Both produce the identical patched module — the
+example above was verified end-to-end against `Azure/avm-res-storage-storageaccount/azurerm`
+`0.6.4` (4 `ignore_changes = [tags]` injected, addresses unchanged, clean plan).
 
 ---
 
