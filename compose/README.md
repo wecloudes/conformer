@@ -5,7 +5,7 @@ the hardening pipeline, nothing else to operate.
 
 | Service | Role |
 |---|---|
-| `registry-api` | Go service: Terraform Module Registry Protocol + the `/m/` direct endpoint; bundles the patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) and builds modules on demand |
+| `registry-api` | Go service: Terraform Module Registry Protocol + the `/m/` (header) & `/dl/` (zip body, Terragrunt) direct endpoints; bundles the patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) and builds modules on demand |
 | `versitygw` | Versity S3 Gateway (Apache-2.0) — S3 storage for the hardened module zips (POSIX backend) |
 | `builder` | one-shot pre-builder (`./build.sh`), same image as `registry-api` (`--profile build`) |
 | `caddy` | wildcard reverse proxy + automatic local TLS for `*.conformer.local` (and the apex) |
@@ -34,10 +34,15 @@ version = "0.2.0"
 ```
 
 Or pick an ad-hoc transformation set with no framework (direct go-getter mode,
-ungated):
+ungated). Terraform uses `/m/` (returns an `X-Terraform-Get` header); Terragrunt
+uses `/dl/` (streams the zip body — go-getter does not follow the header):
 
 ```hcl
+# Terraform module block
 source = "https://conformer.local/m/Azure/avm-res-automation-automationaccount/azurerm?version=0.2.0&transformation=tags,destroy"
+
+# Terragrunt source (version on the path; archive=zip forces zip handling)
+source = "https://conformer.local/dl/Azure/avm-res-automation-automationaccount/azurerm/0.2.0.zip?archive=zip&transformation=tags,destroy"
 ```
 
 ## 2b. Pre-build a module (optional)
@@ -50,7 +55,7 @@ Warm the cache or run without dynamic mode:
 ```
 
 Each runs the layered pipeline (sanitize → strip → mapotf → toggles → fmt) and
-uploads `…/cis_v600/5.11.0.zip` to MinIO.
+uploads `…/cis_v600/5.11.0.zip` to S3 (versitygw).
 
 ## 3. Local DNS + TLS (one-time)
 
@@ -92,8 +97,8 @@ terraform plan
 ```
 
 Switch framework = change the subdomain (`soc2.conformer.local`). The token must
-be entitled to that framework in `STATIC_TOKENS`. The direct `/m/` mode (section
-2a) needs no token.
+be entitled to that framework in `STATIC_TOKENS`. The direct `/m/` and `/dl/`
+modes (section 2a) need no token.
 
 ## Private / VPN-only access
 

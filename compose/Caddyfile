@@ -1,19 +1,25 @@
-# Wildcard reverse proxy + automatic local TLS for the registry.
+# Wildcard reverse proxy + TLS for the registry.
 #
-# Every framework subdomain (cis., iso27001., soc2., ...) resolves to the same
-# registry API, which reads the framework from the Host header. Caddy issues a
-# certificate from its internal CA via `tls internal`; trust that CA on the host
-# so Terraform accepts the HTTPS endpoint (see compose/README.md).
+# Every framework subdomain (cis., iso27001., ...) and the bare apex proxy to
+# the registry API, which reads the framework from the Host header.
+#
+# Two knobs (set in compose/.env):
+#   DOMAIN     registry domain. Default conformer.local. The framework is the
+#              subdomain (cis.<DOMAIN>); the apex serves the framework-less
+#              "direct" mode (/m/{ns}/{name}/{provider}?transformation=...).
+#   Default: self-signed CA (`tls internal`) — trust it on each client.
+#   Real, publicly-trusted wildcard via Let's Encrypt DNS-01 (no public ports,
+#   no client CA trust) — set in .env:
+#     CADDY_GLOBAL=acme_dns cloudflare {env.CF_API_TOKEN}
+#     CADDY_SITE_TLS=                      # empty: drop `tls internal`, use ACME
+#   and provide CF_API_TOKEN (Cloudflare token, Zone:DNS:Edit). Needs the
+#   Cloudflare-DNS build of Caddy (compose/caddy/Dockerfile).
 
-*.conformer.local {
-	tls internal
-	reverse_proxy registry-api:8080
+{
+	{$CADDY_GLOBAL:}
 }
 
-# Apex (no subdomain) -> registry-api. Serves the framework-less go-getter
-# "direct" mode: conformer.local/m/{ns}/{name}/{provider}?transformation=...
-# The wildcard above does not match the bare apex domain.
-conformer.local {
-	tls internal
+{$DOMAIN:conformer.local}, *.{$DOMAIN:conformer.local} {
+	{$CADDY_SITE_TLS:tls internal}
 	reverse_proxy registry-api:8080
 }

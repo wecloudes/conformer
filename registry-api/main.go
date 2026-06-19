@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -213,6 +214,7 @@ func main() {
 	mux.HandleFunc("/v1/modules/", srv.handleModules)
 	mux.HandleFunc("/v1/catalog", srv.handleCatalog)
 	mux.HandleFunc("/m/", srv.handleDirectModule)
+	mux.HandleFunc("/dl/", srv.handleDirectDownload)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "ok")
@@ -415,24 +417,48 @@ func (s *Server) handleDirectModule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing required query param: version", http.StatusBadRequest)
 		return
 	}
-	transforms := canonicalTransforms(r.URL.Query().Get("transformation"))
+	objectKey, status, err := s.resolveDirectObject(r.Context(), namespace, name, provider, version,
+		r.URL.Query().Get("transformation"), r.URL.Query().Get("framework"))
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	presignedURL, err := s.presignClient.PresignedGetObject(context.Background(),
+		s.config.S3Bucket, objectKey, 10*time.Minute, nil)
+	if err != nil {
+		log.Printf("Error generating presigned URL: %v", err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	// go-getter (http source, dir mode) follows X-Terraform-Get to the archive.
+	// The presigned URL path ends in .zip, so go-getter detects + unpacks it.
+	w.Header().Set("X-Terraform-Get", presignedURL.String())
+	w.WriteHeader(http.StatusOK)
+}
+
+// resolveDirectObject validates the ad-hoc transformation/framework selection,
+// computes the canonical cache object key, and builds it on miss. Shared by the
+// /m/ (X-Terraform-Get redirect) and /dl/ (streamed archive) direct endpoints.
+// On error it returns the HTTP status to send with the (user-facing) message.
+func (s *Server) resolveDirectObject(ctx context.Context, namespace, name, provider, version, transformRaw, frameworkRaw string) (string, int, error) {
+	transforms := canonicalTransforms(transformRaw)
 
 	// Optional framework: compose its unit bundle with the ad-hoc transformations
 	// (the build engine appends TRANSFORMATIONS after the framework's units). This
 	// stays OPEN — no token, no entitlement — because composing more units can
 	// only harden, never weaken. Entitlement lives only on the registry path.
 	framework := ""
-	if fwRaw := r.URL.Query().Get("framework"); fwRaw != "" {
-		if !isSafeName(fwRaw) {
-			http.Error(w, "invalid framework query param (expected [A-Za-z0-9_-])", http.StatusBadRequest)
-			return
+	if frameworkRaw != "" {
+		if !isSafeName(frameworkRaw) {
+			return "", http.StatusBadRequest, fmt.Errorf("invalid framework query param (expected [A-Za-z0-9_-])")
 		}
-		framework = mapFramework(fwRaw)
+		framework = mapFramework(frameworkRaw)
 	}
 
 	if framework == "" && len(transforms) == 0 {
-		http.Error(w, "need at least one of: framework, transformation (comma-separated, [A-Za-z0-9_-])", http.StatusBadRequest)
-		return
+		return "", http.StatusBadRequest, fmt.Errorf("need at least one of: framework, transformation (comma-separated, [A-Za-z0-9_-])")
 	}
 
 	// Canonical cache key. framework-only reuses the registry path's cache entry
@@ -455,31 +481,74 @@ func (s *Server) handleDirectModule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build on miss (these profiles are never pre-built).
-	if _, err := s.s3Client.StatObject(r.Context(), s.config.S3Bucket, objectKey, minio.StatObjectOptions{}); err != nil {
+	if _, err := s.s3Client.StatObject(ctx, s.config.S3Bucket, objectKey, minio.StatObjectOptions{}); err != nil {
 		errResp := minio.ToErrorResponse(err)
 		if errResp.Code != "NoSuchKey" {
 			log.Printf("Error checking object %s: %v", objectKey, err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
+			return "", http.StatusInternalServerError, fmt.Errorf("internal error")
 		}
-		if berr := s.ensureBuilt(r.Context(), namespace, name, provider, version, buildFramework, strings.Join(transforms, ","), objectKey); berr != nil {
-			http.Error(w, fmt.Sprintf("Build failed: %v", berr), http.StatusBadGateway)
-			return
+		if berr := s.ensureBuilt(ctx, namespace, name, provider, version, buildFramework, strings.Join(transforms, ","), objectKey); berr != nil {
+			return "", http.StatusBadGateway, fmt.Errorf("build failed: %v", berr)
 		}
 	}
+	return objectKey, http.StatusOK, nil
+}
 
-	presignedURL, err := s.presignClient.PresignedGetObject(context.Background(),
-		s.config.S3Bucket, objectKey, 10*time.Minute, nil)
-	if err != nil {
-		log.Printf("Error generating presigned URL: %v", err)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+// handleDirectDownload streams the built archive BODY (not an X-Terraform-Get
+// redirect), so a plain go-getter http source — e.g. a Terragrunt `source` —
+// can fetch and unpack it directly. Same ad-hoc selection + cache as /m/, OPEN
+// by design (ADR-009). The `.zip` suffix lets go-getter detect the archive.
+//
+//	source = "https://<domain>/dl/<ns>/<name>/<provider>/<version>.zip?transformation=tags,destroy"
+//	source = "https://<domain>/dl/<ns>/<name>/<provider>/<version>.zip?framework=cis&transformation=tags"
+func (s *Server) handleDirectDownload(w http.ResponseWriter, r *http.Request) {
+	if !s.config.DirectMode {
+		http.Error(w, "Direct transformation mode disabled", http.StatusNotFound)
 		return
 	}
 
-	// go-getter (http source, dir mode) follows X-Terraform-Get to the archive.
-	// The presigned URL path ends in .zip, so go-getter detects + unpacks it.
-	w.Header().Set("X-Terraform-Get", presignedURL.String())
-	w.WriteHeader(http.StatusOK)
+	// Path: /dl/{namespace}/{name}/{provider}/{version}.zip
+	path := strings.TrimPrefix(r.URL.Path, "/dl/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 4 || parts[0] == "" || parts[1] == "" || parts[2] == "" || !strings.HasSuffix(parts[3], ".zip") {
+		http.Error(w, "Expected /dl/{namespace}/{name}/{provider}/{version}.zip?transformation=", http.StatusBadRequest)
+		return
+	}
+	namespace, name, provider := parts[0], parts[1], parts[2]
+	version := strings.TrimSuffix(parts[3], ".zip")
+	if version == "" {
+		http.Error(w, "missing version in path", http.StatusBadRequest)
+		return
+	}
+
+	objectKey, status, err := s.resolveDirectObject(r.Context(), namespace, name, provider, version,
+		r.URL.Query().Get("transformation"), r.URL.Query().Get("framework"))
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	obj, err := s.s3Client.GetObject(r.Context(), s.config.S3Bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		log.Printf("Error opening object %s: %v", objectKey, err)
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	defer obj.Close()
+	st, err := obj.Stat()
+	if err != nil {
+		log.Printf("Error stating object %s: %v", objectKey, err)
+		http.Error(w, "Internal error", http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", st.Size))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", version+".zip"))
+	if _, err := io.Copy(w, obj); err != nil {
+		// Header already sent; can only log a truncated stream.
+		log.Printf("Error streaming object %s: %v", objectKey, err)
+	}
 }
 
 // canonicalTransforms parses, sanitizes, dedupes, and SORTS a comma-separated

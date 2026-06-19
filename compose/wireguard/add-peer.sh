@@ -23,7 +23,7 @@ ip=${2:-}
 command -v wg >/dev/null || { echo "wireguard-tools not installed"; exit 1; }
 
 # Server public key, derived from the [Interface] PrivateKey in wg0.conf.
-srv_priv=$(awk -F'= *' '/^[[:space:]]*PrivateKey/{print $2; exit}' "$WG_CONF")
+srv_priv=$(sed -n 's/^[[:space:]]*PrivateKey[[:space:]]*=[[:space:]]*//p' "$WG_CONF" | head -1)
 [ -n "$srv_priv" ] || { echo "no PrivateKey in $WG_CONF"; exit 1; }
 srv_pub=$(printf '%s' "$srv_priv" | wg pubkey)
 

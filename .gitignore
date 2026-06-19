@@ -2,6 +2,10 @@
 compose/.env
 compose/caddy-root.crt
 
+# WireGuard peer configs — hold private keys, never commit
+compose/wireguard/*.conf
+*.conf
+
 # terraform / opentofu
 **/.terraform/
 **/.terraform.lock.hcl

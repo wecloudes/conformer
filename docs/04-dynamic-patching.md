@@ -127,7 +127,7 @@ framework manifest — it composes automatically, no code change.
 # compose/.env
 DYNAMIC_BUILD=true
 UPSTREAM_REGISTRY=registry.terraform.io
-DIRECT_MODE=true              # serve the /m/ go-getter direct path (default)
+DIRECT_MODE=true              # serve the direct paths /m/ (header) + /dl/ (zip body) (default)
 ```
 
 The `registry-api` image is built from `registry-api/Dockerfile`, which bakes in
@@ -174,6 +174,37 @@ These profiles are never pre-baked, so this path always builds on a miss
 regardless of `DYNAMIC_BUILD`; it is gated only by `DIRECT_MODE` (on by default).
 A worked example lives in `examples/direct-transform/`.
 
+### `/m/` vs `/dl/` — header redirect vs streamed archive
+
+`/m/` returns the module via the Terraform registry `X-Terraform-Get` **header**
+(pointing at a presigned `.zip`). Terraform's module installer follows that
+header; **go-getter does not**. So a **Terragrunt `source`** — which is plain
+go-getter — cannot consume `/m/`.
+
+`handleDirectDownload` (`/dl/`) serves the identical build but **streams the zip
+body** with `Content-Type: application/zip`, so any go-getter HTTP source fetches
+and unpacks it directly. Same selection, same canonical cache key, same OPEN
+model — only the delivery differs. The version rides the **path** (`.../<version>.zip`),
+not a query arg:
+
+```hcl
+# Terragrunt — ad-hoc units, no framework, no token. archive=zip forces
+# go-getter to treat the response as a zip despite the trailing query string.
+terraform {
+  source = "https://conformer.local/dl/Azure/avm-res-storage-storageaccount/azurerm/0.6.4.zip?archive=zip&transformation=tags"
+}
+```
+
+| Consumer | `/m/` (header) | `/dl/` (body) | `tfr://<fw>.host` (registry) |
+|---|---|---|---|
+| Terraform `module{}` | ✅ | ✅ | ✅ |
+| Terragrunt `source` | ❌ (header not followed) | ✅ | ✅ (gated, named set) |
+
+Use `/dl/` for ad-hoc one-off unit sets in Terragrunt; use a **framework** (a
+named, reusable unit bundle — e.g. [`frameworks/tags.hcl`](../frameworks/tags.hcl),
+the single `tags` unit) over `tfr://` when the set is a standing policy you reuse
+across modules and want entitlement-gated.
+
 ## Trade-offs
 
 | | Pre-built (builder / build.sh) | Dynamic (on demand) |
@@ -204,8 +235,8 @@ Notes:
   block (better suited to curated first-party modules).
 - **Trust / source allow-list:** by default dynamic mode will fetch and serve
   *any* module name the caller requests. On the framework subdomain path the
-  token entitlement check still applies; the direct `/m/` path is open by design
-  (no token, no entitlement). `ALLOWED_MODULES` (CSV of `<namespace>/<name>`
+  token entitlement check still applies; the direct `/m/` and `/dl/` paths are
+  open by design (no token, no entitlement). `ALLOWED_MODULES` (CSV of `<namespace>/<name>`
   globs, e.g. `terraform-aws-modules/*,Azure/avm-res-*`) is the build-time guard
   for both: it restricts which upstream modules may be built — a non-matching
   request fails the build. Empty = allow any.
