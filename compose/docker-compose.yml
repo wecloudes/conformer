@@ -16,7 +16,10 @@ name: conformer
 
 services:
   registry-api:
-    image: conformer-registry-api:latest
+    # Default: pull the prebuilt multi-arch image from Docker Hub. Override with
+    # REGISTRY_IMAGE, or run `docker compose build` / `make image` to build the
+    # local tree and retag it over this ref.
+    image: ${REGISTRY_IMAGE:-wecloudes/conformer:latest}
     build:
       context: ..
       dockerfile: registry-api/Dockerfile
@@ -105,7 +108,7 @@ services:
   # sees the current transformations/, frameworks/ and scripts/.
   builder:
     profiles: ["build"]
-    image: conformer-registry-api:latest
+    image: ${REGISTRY_IMAGE:-wecloudes/conformer:latest}
     build:
       context: ..
       dockerfile: registry-api/Dockerfile
