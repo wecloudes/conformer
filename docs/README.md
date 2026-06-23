@@ -13,7 +13,7 @@ Read in order:
 1. **[Transformation techniques](01-transformation-techniques.md)** — *how* a
    module is hardened. The five-layer pipeline (sanitize → strip → transform →
    toggle → gate), the tools behind each layer (`sed`, `awk`, `mapotf`,
-   `hcledit`, `gitleaks`, `jq`), and before/after HCL for each.
+   `gitleaks`, `jq`), and before/after HCL for each.
 
 2. **[Enforcement models](02-enforcement-models.md)** — *where* the
    transformation runs and *how strongly* it is enforced. Model A (registry,
@@ -53,7 +53,7 @@ listing the units it enables, not a folder of rules.
 
 | Technique | Tooling | Documented in |
 |---|---|---|
-| Lifecycle injection | `hcledit` / `mapotf` | [techniques §1](01-transformation-techniques.md#1-lifecycle-injection) |
+| Lifecycle injection | `mapotf` | [techniques §1](01-transformation-techniques.md#1-lifecycle-injection) |
 | Block removal | `awk` | [techniques §2](01-transformation-techniques.md#2-block-removal) |
 | Attribute restriction | `validation {}` + `jq` | [techniques §3](01-transformation-techniques.md#3-attribute-restriction) |
 | Content sanitization | `sed` + `gitleaks` | [techniques §4](01-transformation-techniques.md#4-content-sanitization) |

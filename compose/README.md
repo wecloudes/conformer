@@ -5,7 +5,7 @@ the hardening pipeline, nothing else to operate.
 
 | Service | Role |
 |---|---|
-| `registry-api` | Go service: Terraform Module Registry Protocol + the `/m/` (header) & `/dl/` (zip body, Terragrunt) direct endpoints; bundles the patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) and builds modules on demand |
+| `registry-api` | Go service: Terraform Module Registry Protocol + the `/m/` (header) & `/dl/` (zip body, Terragrunt) direct endpoints; bundles the patch toolkit (tofu/mapotf/jq/gitleaks) and builds modules on demand |
 | `versitygw` | Versity S3 Gateway (Apache-2.0) — S3 storage for the hardened module zips (POSIX backend) |
 | `builder` | one-shot pre-builder (`./build.sh`), same image as `registry-api` (`--profile build`) |
 | `caddy` | wildcard reverse proxy + automatic local TLS for `*.conformer.local` (and the apex) |
