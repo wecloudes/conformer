@@ -10,7 +10,6 @@ BUSL-licensed or bundled AGPL binaries.
 |---|---|---|---|
 | [OpenTofu](https://github.com/opentofu/opentofu) | MPL-2.0 | module fetch (`tofu get`), `fmt` | replaces HashiCorp Terraform |
 | [mapotf](https://github.com/Azure/mapotf) | MIT | structural transforms (generic + module-specific) | |
-| [hcledit](https://github.com/minamijoyo/hcledit) | MIT | targeted HCL edits | |
 | [gitleaks](https://github.com/gitleaks/gitleaks) | MIT | secret scan | |
 
 ## Go dependencies (registry-api)

@@ -60,7 +60,7 @@ The whole product is the four Compose services in [`compose/`](compose/):
 | `builder` | one-shot `./build.sh` (registry-api image) | Pre-build / warm the cache, upload to S3 |
 | `caddy` | Caddy | Wildcard subdomain routing + automatic local TLS |
 
-The patch toolkit (tofu/mapotf/hcledit/jq/gitleaks) is bundled **inside** the
+The patch toolkit (tofu/mapotf/jq/gitleaks) is bundled **inside** the
 `registry-api` image — there is no separate toolkit image.
 
 ### How it works
@@ -80,7 +80,7 @@ documentation. The build applies the DIY transformation playbook in layers:
 |---|---|---|
 | Sanitization | `sed` + `gitleaks` | strip hardcoded account IDs / regions (AWS-provider modules only), fail on leaked secrets |
 | Block removal | `awk` brace-counter | strip injected `provisioner` / `local-exec` blocks |
-| Structural | `mapotf` + `hcledit` | inject `lifecycle { prevent_destroy }`, override insecure attributes (e.g. force public-access flags shut), add plan-time `check` blocks |
+| Structural | `mapotf` | inject `lifecycle { prevent_destroy }`, override insecure attributes (e.g. force public-access flags shut), add plan-time `check` blocks |
 | Advisory toggles | `variable { validation }` | source-time opt-out flags per control |
 | Plan-time gate | `terraform show -json` + `jq` | assert caller config satisfies controls at plan time, incl. edge/transit asserts a source-time force can't reach — AWS: ELB TLS, WAF association, API Gateway logging; Azure: App Gateway TLS+WAF, APIM diagnostics, NSG flow logs (`scripts/plan-gate.sh [planfile] [framework]`; `--self-test` for canned plans) |
 
@@ -350,7 +350,7 @@ conformer/
 │   ├── main.go
 │   ├── build.go
 │   ├── go.mod
-│   └── Dockerfile                  # tofu+mapotf+hcledit+jq+gitleaks + the Go binary
+│   └── Dockerfile                  # tofu+mapotf+jq+gitleaks + the Go binary
 ├── transformations/                # Atomic, composable transformation units
 │   ├── destroy/                    # generic: prevent_destroy on all resources
 │   │   └── _default/rules.mptf.hcl

@@ -10,7 +10,7 @@ upstream module (fetched at a git tag)
    ┌────▼─────────────────────────────────────────────┐
    │ Layer 1  SANITIZE     sed + gitleaks              │  strip IDs/regions, fail on secrets
    │ Layer 2  STRIP        awk                         │  remove provisioner / local-exec
-   │ Layer 3  TRANSFORM    mapotf + hcledit            │  inject lifecycle, override attrs, add checks
+   │ Layer 3  TRANSFORM    mapotf                       │  inject lifecycle, override attrs, add checks
    │ Layer 4  TOGGLES      variable { validation }     │  source-time opt-out flags
    │ Layer 5  GATE         terraform show -json + jq   │  plan-time assertions (consumer/CI)
    └────┬─────────────────────────────────────────────┘
@@ -46,10 +46,9 @@ builder. All tools ship in one image,
 **Goal:** add a `lifecycle` block to a resource you don't own — e.g. protect a
 bucket from accidental destruction.
 
-**Tools:** `hcledit` (imperative) or `mapotf` (declarative). This project uses
-`mapotf` as the primary engine and `hcledit` as a fallback.
+**Tool:** `mapotf` (declarative).
 
-**Declarative (mapotf)** — from the generic `destroy` unit,
+From the generic `destroy` unit,
 [`transformations/destroy/_default/rules.mptf.hcl`](../transformations/destroy/_default/rules.mptf.hcl).
 Because `prevent_destroy` is a meta-argument valid on *any* resource type, this
 unit is generic (it ships under `_default`, not under a module dir) and hits
@@ -78,13 +77,6 @@ transform "update_in_place" prevent_destroy {
 }
 ```
 
-**Imperative (hcledit)** — same effect, one command:
-
-```bash
-hcledit attribute append \
-  'resource.aws_s3_bucket.this.lifecycle.prevent_destroy' true -f main.tf -u
-```
-
 **Before → after:**
 
 ```hcl
@@ -97,8 +89,8 @@ resource "aws_s3_bucket" "this" {        resource "aws_s3_bucket" "this" {
 ```
 
 `mapotf` addresses blocks by label (`aws_s3_bucket.this`), so it works even when
-the resource uses `count`/`for_each`. Prefer it when you need to hit *every*
-resource of a type; reach for `hcledit` for a single targeted edit.
+the resource uses `count`/`for_each`, and hits *every* resource of a type in one
+pass.
 
 `destroy` is one of two **generic** transformation units (the other is `tags`).
 They are separate units, but when both are selected `mapotf`'s
@@ -253,7 +245,6 @@ Contents (pinned versions, set as `ARG`s in the Dockerfile):
 |---|---|---|
 | OpenTofu | 1.12.2 | MPL-2.0 |
 | mapotf | 0.1.4 | MIT |
-| hcledit | 0.2.17 | MIT |
 | gitleaks | 8.30.1 | MIT |
 
 plus `jq`/`gawk`/`sed`. OpenTofu replaces Terraform (BUSL); uploads use the
