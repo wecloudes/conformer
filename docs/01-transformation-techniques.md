@@ -233,10 +233,16 @@ left untouched — no dangling references, no spurious AWS provider dependency.
 ## The registry-api image
 
 Every tool above is bundled into the `registry-api` image so the pipeline (and
-any consumer) has a consistent environment:
+any consumer) has a consistent environment. Pull the prebuilt multi-arch image:
 
 ```bash
-docker build -f registry-api/Dockerfile -t conformer-registry-api:latest .
+docker pull wecloudes/conformer:latest
+```
+
+or build it from source:
+
+```bash
+docker build -f registry-api/Dockerfile -t wecloudes/conformer:latest .
 ```
 
 Contents (pinned versions, set as `ARG`s in the Dockerfile):

@@ -83,10 +83,10 @@ cp compose/.env.example compose/.env
 `S3_PUBLIC_ENDPOINT` must also be the VPN host: the S3 signature binds the
 hostname, so a `localhost`/public value would not resolve for a remote peer.
 
-Build the image once, then bring it up:
+Bring it up (compose pulls `wecloudes/conformer:latest` by default; run
+`make image` first to build from source instead):
 
 ```bash
-make image                                        # build conformer-registry-api:latest
 docker compose -f compose/docker-compose.yml up -d
 ```
 

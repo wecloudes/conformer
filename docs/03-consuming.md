@@ -276,15 +276,16 @@ example above was verified end-to-end against `Azure/avm-res-storage-storageacco
 ## CI integration
 
 For Model B in CI, `mapotf` / `terraform` / `jq` must be on PATH. The patch
-toolkit ships inside the `registry-api` image (it bundles all the transform
-tooling), so reuse that image as your CI container:
+toolkit ships inside the prebuilt multi-arch image
+[`wecloudes/conformer`](https://hub.docker.com/r/wecloudes/conformer) (it bundles
+all the transform tooling), so reuse it as your CI container:
 
 ```yaml
 # GitHub Actions
 jobs:
   plan:
     runs-on: ubuntu-latest
-    container: conformer-registry-api:latest
+    container: wecloudes/conformer:latest
     steps:
       - uses: actions/checkout@v4
       - run: terragrunt run-all plan --terragrunt-non-interactive
@@ -294,7 +295,7 @@ jobs:
 ```yaml
 # GitLab CI
 compliance-plan:
-  image: conformer-registry-api:latest
+  image: wecloudes/conformer:latest
   script:
     - cd examples/terragrunt/model-b-mapotf
     - terragrunt run-all plan --terragrunt-non-interactive

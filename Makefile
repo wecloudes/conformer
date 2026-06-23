@@ -1,7 +1,7 @@
 # Conformer — dev tasks. Needs: docker (for HCL/patch tooling via the image),
 # go (for the registry-api build). Build the image once with `make image`.
 
-IMAGE ?= conformer-registry-api:latest
+IMAGE ?= wecloudes/conformer:latest
 DC    := docker compose -f compose/docker-compose.yml
 # Run a shell command inside the image with the repo mounted (override the
 # registry-api entrypoint).
